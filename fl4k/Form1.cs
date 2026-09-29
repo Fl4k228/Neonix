@@ -19,7 +19,9 @@ using ExcelDataReader;
 
 namespace fl4k
 {
+    // ============================================================
     //  АЛГОРИТМЫ СОРТИРОВКИ
+    // ============================================================
     public abstract class SortingAlgorithm
     {
         public string Name { get; protected set; }
@@ -211,7 +213,9 @@ namespace fl4k
         }
     }
 
+    // ============================================================
     //  СОСТОЯНИЕ АЛГОРИТМА
+    // ============================================================
     public class AlgorithmState
     {
         public string Name;
@@ -396,7 +400,9 @@ namespace fl4k
         }
     }
 
+    // ============================================================
     //  КАСТОМНЫЙ ЧЕКБОКС
+    // ============================================================
     public class NeonCheckBox : CheckBox
     {
         [System.ComponentModel.Browsable(false)]
@@ -507,7 +513,9 @@ namespace fl4k
         }
     }
 
+    // ============================================================
     //  ГЛАВНАЯ ФОРМА
+    // ============================================================
     public partial class Form1 : Form
     {
         // ---------- Палитра: графит / чёрный / белый ----------
@@ -617,7 +625,9 @@ namespace fl4k
             LayoutControls();
         }
 
+        // ============================================================
         //  ХЕЛПЕРЫ
+        // ============================================================
         private static bool TryParseDouble(string s, out double value)
         {
             value = 0;
@@ -654,7 +664,9 @@ namespace fl4k
             dataGrid.Refresh();
         }
 
+        // ============================================================
         //  ФОРМАТ ВРЕМЕНИ — МС С 4 ЗНАКАМИ
+        // ============================================================
         private static string FormatTimeTicks(long ticks)
         {
             if (ticks < 0) ticks = 0;
@@ -669,13 +681,15 @@ namespace fl4k
         // BOGO оставляем без изменений.
         private static long GetDisplayedIterations(string algorithmName, long rawIterations)
         {
-            if (algorithmName == "BOGO" || algorithmName == "Быстрая")
+            if (algorithmName == "BOGO")
                 return rawIterations;
 
             return Math.Max(0L, rawIterations - 1L);
         }
 
+        // ============================================================
         //  FULLSCREEN
+        // ============================================================
         private void EnterFullscreen()
         {
             var screen = Screen.FromControl(this);
@@ -702,10 +716,14 @@ namespace fl4k
             LayoutControls();
         }
 
+        // ============================================================
         //  UI
+        // ============================================================
         private void BuildUi()
         {
+            // ============================================================
             //  ЛЕВЫЙ САЙДБАР
+            // ============================================================
             leftPanel = new Panel { BackColor = Color.FromArgb(18, 18, 18), AutoScroll = true };
             leftPanel.Paint += SidebarPanel_Paint;
 
@@ -753,7 +771,9 @@ namespace fl4k
             };
             leftPanel.Controls.Add(lblCount);
 
+            // ============================================================
             //  HEADER
+            // ============================================================
             headerPanel = new Panel { BackColor = BgPanel };
             headerPanel.Paint += HeaderPanel_Paint;
 
@@ -768,7 +788,9 @@ namespace fl4k
             };
             headerPanel.Controls.Add(pageTitle);
 
+            // ============================================================
             //  ОПЦИИ
+            // ============================================================
             optionsPanel = new Panel { BackColor = Color.FromArgb(18, 18, 18) };
             optionsPanel.Paint += CardPanel_Paint;
 
@@ -855,7 +877,9 @@ namespace fl4k
             optionsPanel.Controls.Add(tbDelay);
             optionsPanel.Controls.Add(lblDelayValue);
 
+            // ============================================================
             //  DATA GRID
+            // ============================================================
             dataGrid = new DataGridView
             {
                 AllowUserToAddRows = true,
@@ -898,7 +922,9 @@ namespace fl4k
                 }
             };
 
+            // ============================================================
             //  WORKSPACE
+            // ============================================================
             workspacePanel = new Panel { BackColor = BgCard };
             workspacePanel.Paint += WorkspacePanel_Paint;
             SetDoubleBuffered(workspacePanel);
@@ -917,7 +943,9 @@ namespace fl4k
             };
             workspacePanel.Controls.Add(workspaceHint);
 
+            // ============================================================
             //  КНОПКИ
+            // ============================================================
             btnCalculate = new SmoothButton
             {
                 Text = "РАССЧИТАТЬ",
@@ -1023,7 +1051,9 @@ namespace fl4k
                 ?.SetValue(c, true, null);
         }
 
+        // ============================================================
         //  РАСКЛАДКА
+        // ============================================================
         private void LayoutControls()
         {
             // Защита от вызова при свёрнутом окне
@@ -1111,7 +1141,9 @@ namespace fl4k
                 headerPanel.Invalidate();
         }
 
+        // ============================================================
         //  РИСОВАНИЕ
+        // ============================================================
         private void SidebarPanel_Paint(object sender, PaintEventArgs e)
         {
             var g = e.Graphics;
@@ -1168,7 +1200,9 @@ namespace fl4k
             g.DrawPath(pen, path);
         }
 
+        // ============================================================
         //  ВИЗУАЛИЗАЦИЯ
+        // ============================================================
         private void WorkspacePanel_Paint(object sender, PaintEventArgs e)
         {
             if (workspacePanel.Width <= 0 || workspacePanel.Height <= 0) return;
@@ -1330,7 +1364,9 @@ namespace fl4k
             g.DrawString(info, infoFont, infoBrush, plot.Left + 2, plot.Bottom + 2);
         }
 
+        // ============================================================
         //  ДАННЫЕ
+        // ============================================================
         private void SetupGrid()
         {
             dataGrid.Columns.Clear();
@@ -1509,7 +1545,9 @@ namespace fl4k
             SyncDataFromGrid();
         }
 
+        // ============================================================
         //  ФАБРИКА
+        // ============================================================
         private static SortingAlgorithm CreateAlgoByName(string name)
         {
             switch (name)
@@ -1523,7 +1561,9 @@ namespace fl4k
             }
         }
 
+        // ============================================================
         //  ГЕНЕРАЦИЯ
+        // ============================================================
         private void BtnGenerate_Click(object sender, EventArgs e)
         {
             using var dlg = new GenerateForm();
@@ -1566,7 +1606,9 @@ namespace fl4k
             workspacePanel.Invalidate();
         }
 
+        // ============================================================
         //  EXCEL
+        // ============================================================
         private void BtnExcel_Click(object sender, EventArgs e)
         {
             using var dlg = new OpenFileDialog
@@ -1624,7 +1666,9 @@ namespace fl4k
             return result;
         }
 
+        // ============================================================
         //  GOOGLE SHEETS
+        // ============================================================
         private async void BtnGoogle_Click(object sender, EventArgs e)
         {
             using var dlg = new GoogleLinkForm();
@@ -1710,14 +1754,18 @@ namespace fl4k
             return m.Success ? m.Groups[1].Value : null;
         }
 
+        // ============================================================
         //  СТОП
+        // ============================================================
         private void BtnStop_Click(object sender, EventArgs e)
         {
             _cts?.Cancel();
             lblStatus.Text = "Остановка...";
         }
 
+        // ============================================================
         //  РАССЧИТАТЬ
+        // ============================================================
         private async void BtnCalculate_Click(object sender, EventArgs e)
         {
             if (_isRunning) return;
@@ -1973,8 +2021,9 @@ namespace fl4k
                             }
                             else if (ev.type == 2)
                             {
-                                if (st.Name == "BOGO" || st.Name == "Быстрая")
+                                if (st.Name == "BOGO")
                                 {
+                                    // BOGO не трогаем — считаем его итерации как раньше.
                                     lock (st.Sync)
                                     {
                                         st.Iterations++;
@@ -1982,6 +2031,9 @@ namespace fl4k
                                 }
                                 else
                                 {
+                                    // Событие приходит в конце полного логического прохода.
+                                    // Если после него остаётся ещё один проход, значит алгоритм
+                                    // начинает повтор — именно его и считаем как +1 итерацию.
                                     remainingIterationEvents--;
 
                                     if (remainingIterationEvents > 0)
@@ -2097,7 +2149,9 @@ namespace fl4k
                 workspacePanel.Invalidate();
         }
 
+        // ============================================================
         //  КЛАВИШИ
+        // ============================================================
         private void Form1_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode == Keys.Escape)
@@ -2118,7 +2172,9 @@ namespace fl4k
         }
     }
 
+    // ============================================================
     //  ФОРМА: ГЕНЕРАЦИЯ
+    // ============================================================
     public class GenerateForm : Form
     {
         private NumericUpDown nudCount, nudMin, nudMax;
@@ -2213,7 +2269,9 @@ namespace fl4k
         }
     }
 
+    // ============================================================
     //  ФОРМА: GOOGLE SHEETS
+    // ============================================================
     public class GoogleLinkForm : Form
     {
         private TextBox txtUrl;
