@@ -2,8 +2,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -17,9 +19,7 @@ using ExcelDataReader;
 
 namespace fl4k
 {
-    // ============================================================
     //  АЛГОРИТМЫ СОРТИРОВКИ
-    // ============================================================
     public abstract class SortingAlgorithm
     {
         public string Name { get; protected set; }
@@ -28,20 +28,25 @@ namespace fl4k
 
         public event Action<int, int> OnCompare;
         public event Action<int, int> OnSwap;
+        public event Action OnIteration;
 
         protected void RaiseCompare(int i, int j) => OnCompare?.Invoke(i, j);
         protected void RaiseSwap(int i, int j) => OnSwap?.Invoke(i, j);
-        protected void RaiseIteration() { Iterations++; }
+        protected void RaiseIteration()
+        {
+            Iterations++;
+            OnIteration?.Invoke();
+        }
 
-        public abstract void Sort(int[] array);
+        public abstract void Sort(double[] array);
 
-        protected bool NeedSwap(int a, int b) => Ascending ? a > b : a < b;
+        protected bool NeedSwap(double a, double b) => Ascending ? a > b : a < b;
     }
 
     public class BubbleSort : SortingAlgorithm
     {
         public BubbleSort() { Name = "Пузырьковая"; }
-        public override void Sort(int[] a)
+        public override void Sort(double[] a)
         {
             int n = a.Length;
             for (int i = 0; i < n - 1; i++)
@@ -66,11 +71,11 @@ namespace fl4k
     public class InsertionSort : SortingAlgorithm
     {
         public InsertionSort() { Name = "Вставками"; }
-        public override void Sort(int[] a)
+        public override void Sort(double[] a)
         {
             for (int i = 1; i < a.Length; i++)
             {
-                int key = a[i];
+                double key = a[i];
                 int j = i - 1;
                 while (j >= 0)
                 {
@@ -89,8 +94,9 @@ namespace fl4k
     public class ShakerSort : SortingAlgorithm
     {
         public ShakerSort() { Name = "Шейкерная"; }
-        public override void Sort(int[] a)
+        public override void Sort(double[] a)
         {
+            Iterations = 0;
             int left = 0, right = a.Length - 1;
             while (left < right)
             {
@@ -105,9 +111,13 @@ namespace fl4k
                         swapped = true;
                     }
                 }
-                right--;
+                // Одна итерация — один непустой проход в одном направлении.
                 RaiseIteration();
+                if (!swapped) break;
+                right--;
+                if (left >= right) break;
 
+                swapped = false;
                 for (int i = right; i > left; i--)
                 {
                     RaiseCompare(i - 1, i);
@@ -118,10 +128,9 @@ namespace fl4k
                         swapped = true;
                     }
                 }
-                left++;
                 RaiseIteration();
-
                 if (!swapped) break;
+                left++;
             }
         }
     }
@@ -129,9 +138,9 @@ namespace fl4k
     public class QuickSort : SortingAlgorithm
     {
         public QuickSort() { Name = "Быстрая"; }
-        public override void Sort(int[] a) => QuickSortRec(a, 0, a.Length - 1);
+        public override void Sort(double[] a) => QuickSortRec(a, 0, a.Length - 1);
 
-        private void QuickSortRec(int[] a, int low, int high)
+        private void QuickSortRec(double[] a, int low, int high)
         {
             if (low < high)
             {
@@ -141,9 +150,9 @@ namespace fl4k
             }
         }
 
-        private int Partition(int[] a, int low, int high)
+        private int Partition(double[] a, int low, int high)
         {
-            int pivot = a[high];
+            double pivot = a[high];
             int i = low - 1;
             for (int j = low; j < high; j++)
             {
@@ -168,19 +177,19 @@ namespace fl4k
         private readonly Random _rnd = new Random();
         public BogoSort() { Name = "BOGO"; }
 
-        public override void Sort(int[] a)
+        public override void Sort(double[] a)
         {
             var start = DateTime.Now;
             while (!IsSorted(a))
             {
-                if ((DateTime.Now - start).TotalSeconds > 10)
-                    throw new TimeoutException("BOGO превысила лимит 10 секунд.");
+                if ((DateTime.Now - start).TotalSeconds > 100)
+                    throw new TimeoutException("BOGO превысила лимит 100 секунд.");
                 Shuffle(a);
                 RaiseIteration();
             }
         }
 
-        private void Shuffle(int[] a)
+        private void Shuffle(double[] a)
         {
             for (int i = a.Length - 1; i > 0; i--)
             {
@@ -190,7 +199,7 @@ namespace fl4k
             }
         }
 
-        private bool IsSorted(int[] a)
+        private bool IsSorted(double[] a)
         {
             for (int i = 0; i < a.Length - 1; i++)
             {
@@ -202,22 +211,22 @@ namespace fl4k
         }
     }
 
-    // ============================================================
     //  СОСТОЯНИЕ АЛГОРИТМА
-    // ============================================================
     public class AlgorithmState
     {
         public string Name;
         public Color BarColor;
-        public int[] Data;
+        public double[] Data;
         public int CompareI = -1, CompareJ = -1;
         public int SwapI = -1, SwapJ = -1;
         public long Comparisons;
         public long Swaps;
         public long Iterations;
-        public double AvgMs;
-        public double MinMs;
-        public double MaxMs;
+
+        public long AvgTicks;
+        public long MinTicks;
+        public long MaxTicks;
+
         public int Runs;
         public bool Finished;
         public string Error;
@@ -228,59 +237,315 @@ namespace fl4k
         public List<(int type, int i, int j)> EventLog = new();
         public readonly object LogSync = new object();
 
-        public (int[] data, int ci, int cj, int si, int sj,
+        public (double[] data, int ci, int cj, int si, int sj,
                 long cmp, long swp, long iter,
-                double avg, double min, double max, int runs,
+                long avgTicks, long minTicks, long maxTicks, int runs,
                 bool finished, string err) Snapshot()
         {
             lock (Sync)
             {
-                var copy = new int[Data.Length];
+                var copy = new double[Data.Length];
                 Array.Copy(Data, copy, Data.Length);
                 return (copy, CompareI, CompareJ, SwapI, SwapJ,
                         Comparisons, Swaps, Iterations,
-                        AvgMs, MinMs, MaxMs, Runs,
+                        AvgTicks, MinTicks, MaxTicks, Runs,
                         Finished, Error);
             }
         }
     }
 
-    // ============================================================
-    //  ГЛАВНАЯ ФОРМА — ЛАЗУРНАЯ ТЕМА
-    // ============================================================
+    public static class UiRound
+    {
+        public static GraphicsPath Path(Rectangle rect, int radius)
+        {
+            int d = Math.Max(2, radius * 2);
+            var r = new Rectangle(rect.X, rect.Y, Math.Max(1, rect.Width - 1), Math.Max(1, rect.Height - 1));
+            var path = new GraphicsPath();
+            path.AddArc(r.Left, r.Top, d, d, 180, 90);
+            path.AddArc(r.Right - d, r.Top, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+    }
+
+    public class SmoothButton : Button
+    {
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public int CornerRadius { get; set; } = 12;
+
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public Color HoverBackColor { get; set; } = Color.FromArgb(58, 58, 58);
+
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public Color PressedBackColor { get; set; } = Color.FromArgb(28, 28, 28);
+
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public Color BorderColor { get; set; } = Color.FromArgb(72, 72, 72);
+
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public int BorderThickness { get; set; } = 1;
+
+        private bool _hovered;
+        private bool _pressed;
+
+        public SmoothButton()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.UserPaint |
+                     ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.ResizeRedraw, true);
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            base.OnMouseEnter(e);
+            _hovered = true;
+            Invalidate();
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            _hovered = false;
+            _pressed = false;
+            Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs mevent)
+        {
+            base.OnMouseDown(mevent);
+            _pressed = true;
+            Invalidate();
+        }
+
+        protected override void OnMouseUp(MouseEventArgs mevent)
+        {
+            base.OnMouseUp(mevent);
+            _pressed = false;
+            Invalidate();
+        }
+
+        private Color GetSurfaceColor()
+        {
+            Control p = Parent;
+            while (p != null)
+            {
+                if (p.BackColor != Color.Transparent)
+                    return p.BackColor;
+                p = p.Parent;
+            }
+            return Color.FromArgb(18, 18, 18);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs pevent)
+        {
+            // Не перерисовываем родителя через InvokePaint: это и создавало
+            // белые/серые хвосты под кнопками при наведении.
+            pevent.Graphics.Clear(GetSurfaceColor());
+        }
+
+        protected override void OnPaint(PaintEventArgs pevent)
+        {
+            var g = pevent.Graphics;
+            g.Clear(GetSurfaceColor());
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+
+            var rect = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+            using var path = UiRound.Path(rect, CornerRadius);
+
+            Color fillColor = Enabled
+                ? (_pressed ? PressedBackColor : (_hovered ? HoverBackColor : BackColor))
+                : Color.FromArgb(32, 32, 32);
+
+            using (var fill = new SolidBrush(fillColor))
+                g.FillPath(fill, path);
+
+            if (BorderThickness > 0)
+            {
+                using var pen = new Pen(BorderColor, BorderThickness);
+                pen.Alignment = PenAlignment.Inset;
+                g.DrawPath(pen, path);
+            }
+
+            TextRenderer.DrawText(
+                g,
+                Text,
+                Font,
+                rect,
+                Enabled ? ForeColor : Color.FromArgb(105, 105, 105),
+                TextFormatFlags.HorizontalCenter |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    //  КАСТОМНЫЙ ЧЕКБОКС
+    public class NeonCheckBox : CheckBox
+    {
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public Color CheckColor { get; set; } = Color.White;
+
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public Color BoxBackColor { get; set; } = Color.FromArgb(34, 34, 34);
+
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public Color BoxBorderClr { get; set; } = Color.FromArgb(105, 105, 105);
+
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(
+            System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public Color BoxTextColor { get; set; } = Color.White;
+
+        public NeonCheckBox()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.UserPaint |
+                     ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.ResizeRedraw, true);
+
+            ForeColor = BoxTextColor;
+            BackColor = Color.Transparent;
+            Font = new Font("Segoe UI", 10F);
+            Height = 26;
+            Cursor = Cursors.Hand;
+        }
+
+        protected override void OnPaint(PaintEventArgs pevent)
+        {
+            var g = pevent.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+
+            var bg = Parent != null ? Parent.BackColor : Color.Transparent;
+            if (bg != Color.Transparent)
+            {
+                using (var bgBrush = new SolidBrush(bg))
+                    g.FillRectangle(bgBrush, ClientRectangle);
+            }
+
+            int boxSize = 18;
+            int boxX = 2;
+            int boxY = (Height - boxSize) / 2;
+            var boxRect = new Rectangle(boxX, boxY, boxSize, boxSize);
+
+            using (var boxPath = UiRound.Path(boxRect, 5))
+            {
+                using (var backBrush = new SolidBrush(BoxBackColor))
+                    g.FillPath(backBrush, boxPath);
+                using (var borderPen = new Pen(Checked ? CheckColor : BoxBorderClr, 1.6f))
+                    g.DrawPath(borderPen, boxPath);
+            }
+
+            if (Checked)
+            {
+                using (var checkPen = new Pen(CheckColor, 2.6f))
+                {
+                    checkPen.StartCap = LineCap.Round;
+                    checkPen.EndCap = LineCap.Round;
+
+                    g.DrawLine(checkPen, boxX + 4, boxY + 9, boxX + 7, boxY + 13);
+                    g.DrawLine(checkPen, boxX + 7, boxY + 13, boxX + 14, boxY + 5);
+                }
+            }
+
+            var textRect = new Rectangle(boxX + boxSize + 8, 0,
+                Math.Max(1, Width - boxSize - 12), Height);
+
+            using (var textBrush = new SolidBrush(BoxTextColor))
+            using (var sf = new StringFormat
+            {
+                LineAlignment = StringAlignment.Center,
+                Alignment = StringAlignment.Near
+            })
+            {
+                g.DrawString(Text, Font, textBrush, textRect, sf);
+            }
+        }
+
+        protected override void OnCheckedChanged(EventArgs e)
+        {
+            base.OnCheckedChanged(e);
+            Invalidate();
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            base.OnMouseEnter(e);
+            BoxBackColor = Color.FromArgb(52, 52, 52);
+            Invalidate();
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            BoxBackColor = Color.FromArgb(34, 34, 34);
+            Invalidate();
+        }
+    }
+
+    //  ГЛАВНАЯ ФОРМА
     public partial class Form1 : Form
     {
-        // ---------- Палитра (ЛАЗУРНАЯ) ----------
-        private static readonly Color BgDark      = Color.FromArgb(8, 32, 52);       // фон приложения
-        private static readonly Color BgPanel     = Color.FromArgb(16, 52, 78);      // панели
-        private static readonly Color BgCard      = Color.FromArgb(22, 63, 92);      // карточки
-        private static readonly Color AccentRed   = Color.FromArgb(56, 189, 248);    // акцент — лазурный
-        private static readonly Color AccentHover = Color.FromArgb(103, 213, 255);   // hover — светлее
-        private static readonly Color AccentLight = Color.FromArgb(140, 224, 255);   // светлый лазурный
-        private static readonly Color TextSoft    = Color.FromArgb(214, 238, 250);   // основной текст
-        private static readonly Color TextDim     = Color.FromArgb(138, 190, 216);   // вторичный текст
-        private static readonly Color CompareClr  = Color.FromArgb(250, 204, 21);    // сравнение — янтарный
-        private static readonly Color SwapClr     = Color.FromArgb(255, 255, 255);   // обмен — белый
-        private static readonly Color OkClr       = Color.FromArgb(110, 231, 183);   // успех — мятный
+        // ---------- Палитра: графит / чёрный / белый ----------
+        private static readonly Color BgDark      = Color.FromArgb(14, 14, 14);
+        private static readonly Color BgPanel     = Color.FromArgb(22, 22, 22);
+        private static readonly Color BgCard      = Color.FromArgb(30, 30, 30);
+        private static readonly Color AccentRed   = Color.FromArgb(238, 238, 238);
+        private static readonly Color AccentLight = Color.FromArgb(225, 225, 225);
+        private static readonly Color TextSoft    = Color.FromArgb(245, 245, 245);
+        private static readonly Color TextDim     = Color.FromArgb(155, 155, 155);
+        private static readonly Color CompareClr  = Color.FromArgb(145, 145, 145);
+        private static readonly Color SwapClr     = Color.White;
+        private static readonly Color OkClr       = Color.FromArgb(220, 220, 220);
+
 
         // ---------- Константы ----------
-        private const int MaxBogoElements = 10;
+        private const int MaxBogoElements = 50;
         private const int MaxVisualizeElements = 50;
         private const int RunsPerAlgorithm = 5;
+        private const int SlowAlgorithmWarnThreshold = 5000;
+
+        private int _decimalPlaces = 3;
 
         // ---------- Контролы ----------
         private Panel headerPanel;
-        private Label titleLabel, subtitleLabel;
+        private Label titleLabel;
 
-        private Panel leftPanel, toolbarPanel;
-        private Button btnGenerate, btnExcel, btnGoogle;
+        private Panel leftPanel;
+        private Button btnGenerate, btnExcel, btnGoogle, btnClear;
         private DataGridView dataGrid;
         private Label lblCount;
 
         private Panel optionsPanel;
-        private CheckBox cbBubble, cbInsertion, cbShaker, cbQuick, cbBogo;
+        private NeonCheckBox cbBubble, cbInsertion, cbShaker, cbQuick, cbBogo;
         private Label lblDirection;
         private ComboBox cmbDirection;
+        private Label lblDecimalPlaces;
+        private ComboBox cmbDecimalPlaces;
         private Label lblDelay, lblDelayValue;
         private TrackBar tbDelay;
 
@@ -292,21 +557,21 @@ namespace fl4k
         private Button btnStop;
 
         // ---------- Состояние ----------
-        private int[] _currentData = Array.Empty<int>();
+        private double[] _currentData = Array.Empty<double>();
         private List<AlgorithmState> _states = new();
         private System.Windows.Forms.Timer _renderTimer;
         private bool _isFullscreen = true;
         private bool _isRunning;
         private CancellationTokenSource _cts;
+        private int _hoveredRowHeaderIndex = -1;
 
-        // Лазурная палитра столбиков
         private readonly Dictionary<string, Color> _algoColors = new()
         {
-            ["Пузырьковая"] = Color.FromArgb(56, 189, 248),   // cyan-400
-            ["Вставками"]   = Color.FromArgb(45, 212, 191),   // teal-400
-            ["Шейкерная"]   = Color.FromArgb(103, 232, 249),  // cyan-300
-            ["Быстрая"]     = Color.FromArgb(34, 211, 238),   // cyan-500-ish
-            ["BOGO"]        = Color.FromArgb(125, 211, 252)   // sky-300
+            ["Пузырьковая"] = Color.FromArgb(235, 235, 235),
+            ["Вставками"]   = Color.FromArgb(195, 195, 195),
+            ["Шейкерная"]   = Color.FromArgb(160, 160, 160),
+            ["Быстрая"]     = Color.FromArgb(220, 220, 220),
+            ["BOGO"]        = Color.FromArgb(125, 125, 125)
         };
 
         public Form1()
@@ -322,6 +587,14 @@ namespace fl4k
             SetupGrid();
 
             dataGrid.CellValueChanged += (s, e) => SyncDataFromGrid();
+            dataGrid.CellEndEdit += (s, e) =>
+            {
+                BeginInvoke((Action)(() =>
+                {
+                    RemoveEmptyDataRows();
+                    SyncDataFromGrid();
+                }));
+            };
             dataGrid.RowsRemoved     += (s, e) => SyncDataFromGrid();
             dataGrid.UserDeletingRow += (s, e) => BeginInvoke((Action)SyncDataFromGrid);
 
@@ -331,7 +604,8 @@ namespace fl4k
             _renderTimer = new System.Windows.Forms.Timer { Interval = 16 };
             _renderTimer.Tick += (s, e) =>
             {
-                if (_states.Count > 0) workspacePanel.Invalidate();
+                if (_states.Count > 0 && workspacePanel.Width > 0 && workspacePanel.Height > 0)
+                    workspacePanel.Invalidate();
             };
             _renderTimer.Start();
         }
@@ -343,9 +617,65 @@ namespace fl4k
             LayoutControls();
         }
 
-        // ============================================================
+        //  ХЕЛПЕРЫ
+        private static bool TryParseDouble(string s, out double value)
+        {
+            value = 0;
+            if (string.IsNullOrWhiteSpace(s)) return false;
+
+            s = s.Trim().Replace(',', '.');
+            return double.TryParse(s, NumberStyles.Float,
+                CultureInfo.InvariantCulture, out value);
+        }
+
+        private string FormatValue(double v)
+        {
+            if (_decimalPlaces <= 0)
+            {
+                if (Math.Abs(v - Math.Round(v)) < 1e-9 && Math.Abs(v) < 1e15)
+                    return ((long)Math.Round(v)).ToString(CultureInfo.InvariantCulture);
+                return Math.Round(v).ToString("0", CultureInfo.InvariantCulture);
+            }
+
+            string fmt = "0." + new string('0', _decimalPlaces);
+            return v.ToString(fmt, CultureInfo.InvariantCulture);
+        }
+
+        private string GetGridFormat()
+        {
+            if (_decimalPlaces <= 0) return "0";
+            return "0." + new string('0', _decimalPlaces);
+        }
+
+        private void RefreshGridFormat()
+        {
+            if (dataGrid.Columns["Value"] == null) return;
+            dataGrid.Columns["Value"].DefaultCellStyle.Format = GetGridFormat();
+            dataGrid.Refresh();
+        }
+
+        //  ФОРМАТ ВРЕМЕНИ — МС С 4 ЗНАКАМИ
+        private static string FormatTimeTicks(long ticks)
+        {
+            if (ticks < 0) ticks = 0;
+            double freq = Stopwatch.Frequency;
+            double ms = ticks * 1e3 / freq;
+            return $"{ms:F4} мс";
+        }
+
+
+        // Для интерфейса "итерация" означает именно повтор полного логического прохода.
+        // Первый проход существует в алгоритме, но считается проверочным и в счётчик не входит.
+        // BOGO оставляем без изменений.
+        private static long GetDisplayedIterations(string algorithmName, long rawIterations)
+        {
+            if (algorithmName == "BOGO" || algorithmName == "Быстрая")
+                return rawIterations;
+
+            return Math.Max(0L, rawIterations - 1L);
+        }
+
         //  FULLSCREEN
-        // ============================================================
         private void EnterFullscreen()
         {
             var screen = Screen.FromControl(this);
@@ -372,60 +702,169 @@ namespace fl4k
             LayoutControls();
         }
 
-        // ============================================================
         //  UI
-        // ============================================================
         private void BuildUi()
         {
-            headerPanel = new Panel { Dock = DockStyle.Top, Height = 110, BackColor = BgPanel };
-            headerPanel.Paint += HeaderPanel_Paint;
+            //  ЛЕВЫЙ САЙДБАР
+            leftPanel = new Panel { BackColor = Color.FromArgb(18, 18, 18), AutoScroll = true };
+            leftPanel.Paint += SidebarPanel_Paint;
 
             titleLabel = new Label
             {
-                Text = "Neonix",
-                Font = new Font("Segoe UI", 32F, FontStyle.Bold),
-                ForeColor = AccentLight,
+                Text = "NEONIX",
+                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+                ForeColor = Color.White,
                 BackColor = Color.Transparent,
-                AutoSize = true, Location = new Point(50, 15)
+                TextAlign = ContentAlignment.MiddleCenter
             };
-            subtitleLabel = new Label
-            {
-                Text = "Визуализация алгоритмов сортировки",
-                Font = new Font("Segoe UI", 15F, FontStyle.Italic),
-                ForeColor = TextSoft,
-                BackColor = Color.Transparent,
-                AutoSize = true, Location = new Point(54, 68)
-            };
-            headerPanel.Controls.Add(titleLabel);
-            headerPanel.Controls.Add(subtitleLabel);
-
-            leftPanel = new Panel { BackColor = BgCard, BorderStyle = BorderStyle.None };
-            leftPanel.Paint += CardPanel_Paint;
-
-            toolbarPanel = new Panel { Height = 44, BackColor = BgPanel, Location = new Point(10, 10) };
+            leftPanel.Controls.Add(titleLabel);
 
             btnGenerate = MakeSmallButton("Сгенерировать");
             btnExcel    = MakeSmallButton("Импорт Excel");
             btnGoogle   = MakeSmallButton("Google Sheets");
-
+            btnClear    = MakeSmallButton("Очистить");
             btnGenerate.Click += BtnGenerate_Click;
             btnExcel.Click    += BtnExcel_Click;
             btnGoogle.Click   += BtnGoogle_Click;
+            btnClear.Click    += BtnClear_Click;
+            leftPanel.Controls.Add(btnGenerate);
+            leftPanel.Controls.Add(btnExcel);
+            leftPanel.Controls.Add(btnGoogle);
+            leftPanel.Controls.Add(btnClear);
 
-            toolbarPanel.Controls.Add(btnGenerate);
-            toolbarPanel.Controls.Add(btnExcel);
-            toolbarPanel.Controls.Add(btnGoogle);
+            cbBubble    = MakeAlgoCheck("Пузырьковая", new Point(0, 0), true);
+            cbInsertion = MakeAlgoCheck("Вставками",   new Point(0, 0), false);
+            cbShaker    = MakeAlgoCheck("Шейкерная",   new Point(0, 0), false);
+            cbQuick     = MakeAlgoCheck("Быстрая",     new Point(0, 0), true);
+            cbBogo      = MakeAlgoCheck("BOGO",        new Point(0, 0), false);
+            leftPanel.Controls.Add(cbBubble);
+            leftPanel.Controls.Add(cbInsertion);
+            leftPanel.Controls.Add(cbShaker);
+            leftPanel.Controls.Add(cbQuick);
+            leftPanel.Controls.Add(cbBogo);
 
+            lblCount = new Label
+            {
+                Text = "Элементов: 0",
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = TextDim,
+                BackColor = Color.Transparent,
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            leftPanel.Controls.Add(lblCount);
+
+            //  HEADER
+            headerPanel = new Panel { BackColor = BgPanel };
+            headerPanel.Paint += HeaderPanel_Paint;
+
+            var pageTitle = new Label
+            {
+                Name = "pageTitle",
+                Text = "ВИЗУАЛИЗАЦИЯ СОРТИРОВОК",
+                Font = new Font("Segoe UI", 24F, FontStyle.Bold),
+                ForeColor = TextSoft,
+                BackColor = Color.Transparent,
+                AutoSize = true
+            };
+            headerPanel.Controls.Add(pageTitle);
+
+            //  ОПЦИИ
+            optionsPanel = new Panel { BackColor = Color.FromArgb(18, 18, 18) };
+            optionsPanel.Paint += CardPanel_Paint;
+
+            lblDirection = new Label
+            {
+                Text = "Направление:",
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                ForeColor = AccentLight,
+                BackColor = Color.Transparent,
+                AutoSize = true
+            };
+            cmbDirection = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 9F),
+                BackColor = BgPanel,
+                ForeColor = TextSoft,
+                FlatStyle = FlatStyle.Flat
+            };
+            cmbDirection.Items.AddRange(new object[] { "По возрастанию", "По убыванию" });
+            cmbDirection.SelectedIndex = 0;
+
+            lblDecimalPlaces = new Label
+            {
+                Text = "Знаков после запятой:",
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                ForeColor = AccentLight,
+                BackColor = Color.Transparent,
+                AutoSize = true
+            };
+            cmbDecimalPlaces = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 9F),
+                BackColor = BgPanel,
+                ForeColor = TextSoft,
+                FlatStyle = FlatStyle.Flat
+            };
+            for (int i = 0; i <= 8; i++)
+                cmbDecimalPlaces.Items.Add(i.ToString());
+            cmbDecimalPlaces.SelectedIndex = 3;
+            cmbDecimalPlaces.SelectedIndexChanged += (s, e) =>
+            {
+                _decimalPlaces = cmbDecimalPlaces.SelectedIndex;
+                RefreshGridFormat();
+                if (workspacePanel.Width > 0 && workspacePanel.Height > 0)
+                    workspacePanel.Invalidate();
+            };
+
+            lblDelay = new Label
+            {
+                Text = "Задержка визуализации:",
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                ForeColor = AccentLight,
+                BackColor = Color.Transparent,
+                AutoSize = true
+            };
+            tbDelay = new TrackBar
+            {
+                Minimum = 0,
+                Maximum = 100,
+                Value = 15,
+                TickFrequency = 10,
+                BackColor = BgCard
+            };
+            lblDelayValue = new Label
+            {
+                Text = "15 мс",
+                Font = new Font("Segoe UI", 9F, FontStyle.Italic),
+                ForeColor = TextSoft,
+                BackColor = Color.Transparent,
+                AutoSize = true
+            };
+            tbDelay.ValueChanged += (s, e) =>
+            {
+                lblDelayValue.Text = $"{tbDelay.Value} мс";
+            };
+
+            optionsPanel.Controls.Add(lblDirection);
+            optionsPanel.Controls.Add(cmbDirection);
+            optionsPanel.Controls.Add(lblDecimalPlaces);
+            optionsPanel.Controls.Add(cmbDecimalPlaces);
+            optionsPanel.Controls.Add(lblDelay);
+            optionsPanel.Controls.Add(tbDelay);
+            optionsPanel.Controls.Add(lblDelayValue);
+
+            //  DATA GRID
             dataGrid = new DataGridView
             {
-                Location = new Point(10, 62),
                 AllowUserToAddRows = true,
                 AllowUserToDeleteRows = true,
                 EditMode = DataGridViewEditMode.EditOnEnter,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
-                RowHeadersWidth = 45,
+                RowHeadersWidth = 40,
                 BackgroundColor = BgCard,
-                GridColor = Color.FromArgb(38, 88, 122),
+                GridColor = Color.FromArgb(55, 55, 55),
                 BorderStyle = BorderStyle.None,
                 EnableHeadersVisualStyles = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
@@ -437,129 +876,40 @@ namespace fl4k
             dataGrid.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             dataGrid.DefaultCellStyle.BackColor = BgDark;
             dataGrid.DefaultCellStyle.ForeColor = TextSoft;
-            dataGrid.DefaultCellStyle.SelectionBackColor = AccentRed;
-            dataGrid.DefaultCellStyle.SelectionForeColor = Color.FromArgb(6, 24, 38);
+            dataGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(72, 72, 72);
+            dataGrid.DefaultCellStyle.SelectionForeColor = Color.White;
             dataGrid.RowHeadersDefaultCellStyle.BackColor = BgPanel;
             dataGrid.RowHeadersDefaultCellStyle.ForeColor = TextDim;
             dataGrid.RowHeadersDefaultCellStyle.SelectionBackColor = BgPanel;
             dataGrid.CellValidating += DataGrid_CellValidating;
-
-            lblCount = new Label
+            dataGrid.CellMouseEnter += DataGrid_CellMouseEnter;
+            dataGrid.CellMouseLeave += DataGrid_CellMouseLeave;
+            dataGrid.CellMouseClick += DataGrid_CellMouseClick;
+            dataGrid.CellPainting += DataGrid_CellPainting;
+            dataGrid.MouseLeave += (s, e) =>
             {
-                Text = "Элементов: 0",
-                Font = new Font("Segoe UI", 9F, FontStyle.Italic),
-                ForeColor = TextDim,
-                BackColor = Color.Transparent,
-                TextAlign = ContentAlignment.MiddleRight
+                if (_hoveredRowHeaderIndex >= 0)
+                {
+                    int oldIndex = _hoveredRowHeaderIndex;
+                    _hoveredRowHeaderIndex = -1;
+                    dataGrid.Cursor = Cursors.Default;
+                    if (oldIndex < dataGrid.Rows.Count)
+                        dataGrid.InvalidateCell(-1, oldIndex);
+                }
             };
 
-            leftPanel.Controls.Add(toolbarPanel);
-            leftPanel.Controls.Add(dataGrid);
-            leftPanel.Controls.Add(lblCount);
-
-            // ---------- Опции ----------
-            optionsPanel = new Panel { BackColor = BgCard, BorderStyle = BorderStyle.None };
-            optionsPanel.Paint += CardPanel_Paint;
-
-            var lblAlgo = new Label
-            {
-                Text = "Алгоритмы сортировки:",
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                ForeColor = AccentLight,
-                BackColor = Color.Transparent,
-                AutoSize = true,
-                Location = new Point(15, 10)
-            };
-            optionsPanel.Controls.Add(lblAlgo);
-
-            cbBubble    = MakeAlgoCheck("Пузырьковая", new Point(15, 45),  true);
-            cbInsertion = MakeAlgoCheck("Вставками",   new Point(15, 75),  false);
-            cbShaker    = MakeAlgoCheck("Шейкерная",   new Point(15, 105), false);
-            cbQuick     = MakeAlgoCheck("Быстрая",     new Point(200, 45), true);
-            cbBogo      = MakeAlgoCheck("BOGO",        new Point(200, 75), false);
-
-            optionsPanel.Controls.Add(cbBubble);
-            optionsPanel.Controls.Add(cbInsertion);
-            optionsPanel.Controls.Add(cbShaker);
-            optionsPanel.Controls.Add(cbQuick);
-            optionsPanel.Controls.Add(cbBogo);
-
-            lblDirection = new Label
-            {
-                Text = "Направление:",
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-                ForeColor = AccentLight,
-                BackColor = Color.Transparent,
-                AutoSize = true,
-                Location = new Point(400, 15)
-            };
-            optionsPanel.Controls.Add(lblDirection);
-
-            cmbDirection = new ComboBox
-            {
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 10F),
-                BackColor = BgDark,
-                ForeColor = TextSoft,
-                FlatStyle = FlatStyle.Flat,
-                Location = new Point(400, 45),
-                Width = 220
-            };
-            cmbDirection.Items.AddRange(new object[] { "По возрастанию", "По убыванию" });
-            cmbDirection.SelectedIndex = 0;
-            optionsPanel.Controls.Add(cmbDirection);
-
-            lblDelay = new Label
-            {
-                Text = "Задержка визуализации:",
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-                ForeColor = AccentLight,
-                BackColor = Color.Transparent,
-                AutoSize = true,
-                Location = new Point(650, 15)
-            };
-            optionsPanel.Controls.Add(lblDelay);
-
-            tbDelay = new TrackBar
-            {
-                Minimum = 0,
-                Maximum = 100,
-                Value = 15,
-                TickFrequency = 10,
-                Location = new Point(650, 42),
-                Width = 220,
-                BackColor = BgCard
-            };
-            optionsPanel.Controls.Add(tbDelay);
-
-            lblDelayValue = new Label
-            {
-                Text = "15 мс",
-                Font = new Font("Segoe UI", 9F, FontStyle.Italic),
-                ForeColor = TextSoft,
-                BackColor = Color.Transparent,
-                AutoSize = true,
-                Location = new Point(880, 45)
-            };
-            optionsPanel.Controls.Add(lblDelayValue);
-
-            tbDelay.ValueChanged += (s, e) =>
-            {
-                lblDelayValue.Text = $"{tbDelay.Value} мс";
-            };
-
-            // ---------- Рабочая область ----------
-            workspacePanel = new Panel { BackColor = BgCard, BorderStyle = BorderStyle.None };
+            //  WORKSPACE
+            workspacePanel = new Panel { BackColor = BgCard };
             workspacePanel.Paint += WorkspacePanel_Paint;
             SetDoubleBuffered(workspacePanel);
 
             workspaceHint = new Label
             {
                 Text = "Здесь будет визуализация сортировок.\n\n" +
-                       "1. Введите/сгенерируйте/импортируйте данные слева.\n" +
-                       "2. Отметьте алгоритмы сверху.\n" +
+                       "1. Введите/сгенерируйте/импортируйте данные.\n" +
+                       "2. Отметьте алгоритмы слева.\n" +
                        "3. Нажмите «РАССЧИТАТЬ».",
-                Font = new Font("Segoe UI", 12F),
+                Font = new Font("Segoe UI", 11F),
                 ForeColor = TextDim,
                 BackColor = Color.Transparent,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -567,37 +917,44 @@ namespace fl4k
             };
             workspacePanel.Controls.Add(workspaceHint);
 
-            // ---------- Кнопки ----------
-            btnCalculate = new Button
+            //  КНОПКИ
+            btnCalculate = new SmoothButton
             {
                 Text = "РАССЧИТАТЬ",
-                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(6, 24, 38),  // тёмный текст на лазурном
-                BackColor = AccentRed,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                ForeColor = Color.Black,
+                BackColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Size = new Size(230, 60),
+                Size = new Size(200, 48),
                 Cursor = Cursors.Hand
             };
-            btnCalculate.FlatAppearance.BorderSize = 0;
-            btnCalculate.FlatAppearance.MouseOverBackColor = AccentHover;
-            btnCalculate.FlatAppearance.MouseDownBackColor = Color.FromArgb(14, 165, 233);
+            if (btnCalculate is SmoothButton calcBtn)
+            {
+                calcBtn.CornerRadius = 14;
+                calcBtn.HoverBackColor = Color.FromArgb(220, 220, 220);
+                calcBtn.PressedBackColor = Color.FromArgb(185, 185, 185);
+                calcBtn.BorderColor = Color.FromArgb(235, 235, 235);
+            }
             btnCalculate.Click += BtnCalculate_Click;
 
-            btnStop = new Button
+            btnStop = new SmoothButton
             {
                 Text = "СТОП",
-                Font = new Font("Segoe UI", 13F, FontStyle.Bold),
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
                 ForeColor = Color.White,
-                BackColor = Color.FromArgb(190, 24, 60),
+                BackColor = Color.FromArgb(48, 48, 48),
                 FlatStyle = FlatStyle.Flat,
-                Size = new Size(140, 60),
+                Size = new Size(120, 48),
                 Cursor = Cursors.Hand,
                 Enabled = false
             };
-            btnStop.FlatAppearance.BorderSize = 1;
-            btnStop.FlatAppearance.BorderColor = Color.FromArgb(244, 63, 94);
-            btnStop.FlatAppearance.MouseOverBackColor = Color.FromArgb(225, 40, 80);
-            btnStop.FlatAppearance.MouseDownBackColor = Color.FromArgb(150, 15, 45);
+            if (btnStop is SmoothButton stopBtn)
+            {
+                stopBtn.CornerRadius = 14;
+                stopBtn.HoverBackColor = Color.FromArgb(64, 64, 64);
+                stopBtn.PressedBackColor = Color.FromArgb(36, 36, 36);
+                stopBtn.BorderColor = Color.FromArgb(82, 82, 82);
+            }
             btnStop.Click += BtnStop_Click;
 
             lblStatus = new Label
@@ -609,46 +966,53 @@ namespace fl4k
                 TextAlign = ContentAlignment.MiddleLeft
             };
 
-            Controls.Add(optionsPanel);
-            Controls.Add(workspacePanel);
             Controls.Add(leftPanel);
-            Controls.Add(lblStatus);
-            Controls.Add(btnStop);
-            Controls.Add(btnCalculate);
             Controls.Add(headerPanel);
+            leftPanel.Controls.Add(optionsPanel);
+            Controls.Add(dataGrid);
+            Controls.Add(workspacePanel);
+            Controls.Add(btnCalculate);
+            Controls.Add(btnStop);
+            Controls.Add(lblStatus);
         }
 
-        private CheckBox MakeAlgoCheck(string text, Point loc, bool isChecked)
+        private NeonCheckBox MakeAlgoCheck(string text, Point loc, bool isChecked)
         {
-            return new CheckBox
+            return new NeonCheckBox
             {
                 Text = text,
                 Location = loc,
-                Size = new Size(170, 26),
+                Size = new Size(200, 26),
                 Checked = isChecked,
                 Font = new Font("Segoe UI", 10F),
-                ForeColor = TextSoft,
                 BackColor = Color.Transparent,
-                FlatStyle = FlatStyle.Flat
+                CheckColor = Color.White,
+                BoxBackColor = Color.FromArgb(34, 34, 34),
+                BoxBorderClr = Color.FromArgb(105, 105, 105),
+                BoxTextColor = Color.White
             };
         }
 
         private Button MakeSmallButton(string text)
         {
-            var b = new Button
+            var b = new SmoothButton
             {
                 Text = text,
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
-                ForeColor = TextSoft,
-                BackColor = BgDark,
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(38, 38, 38),
                 FlatStyle = FlatStyle.Flat,
-                Size = new Size(130, 32),
+                Size = new Size(180, 36),
                 Cursor = Cursors.Hand
             };
-            b.FlatAppearance.BorderColor = AccentRed;
-            b.FlatAppearance.BorderSize = 1;
-            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(14, 116, 144);
-            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(8, 80, 110);
+            if (b is SmoothButton smooth)
+            {
+                smooth.CornerRadius = 11;
+                smooth.BorderColor = Color.FromArgb(72, 72, 72);
+                smooth.BorderThickness = 1;
+                smooth.HoverBackColor = Color.FromArgb(55, 55, 55);
+                smooth.PressedBackColor = Color.FromArgb(28, 28, 28);
+            }
             return b;
         }
 
@@ -659,161 +1023,168 @@ namespace fl4k
                 ?.SetValue(c, true, null);
         }
 
-        /// <summary>
-        /// Форматирует время в мс в человекочитаемый вид.
-        /// </summary>
-        private static string FormatTime(double ms)
-        {
-            if (ms < 0) ms = 0;
-
-            if (ms < 1000.0)
-                return $"{ms:F4} мс";
-
-            double sec = ms / 1000.0;
-
-            if (sec < 60.0)
-                return $"{sec:F4} с";
-
-            if (sec < 3600.0)
-            {
-                double min = Math.Floor(sec / 60.0);
-                double remSec = sec - min * 60.0;
-                return $"{min:F0} мин {remSec:F2} с";
-            }
-
-            double totalMin = Math.Floor(sec / 60.0);
-            double hours = Math.Floor(totalMin / 60.0);
-            double remMin = totalMin - hours * 60.0;
-            double remSecFinal = sec - totalMin * 60.0;
-            return $"{hours:F0} ч {remMin:F0} мин {remSecFinal:F0} с";
-        }
-
-        /// <summary>
-        /// Компактный формат для отображения над панелью.
-        /// </summary>
-        private static string FormatTimeShort(double ms)
-        {
-            if (ms < 0) ms = 0;
-
-            if (ms < 1.0)
-                return $"{ms:F3} мс";
-
-            if (ms < 1000.0)
-                return $"{ms:F1} мс";
-
-            double sec = ms / 1000.0;
-            if (sec < 60.0)
-                return $"{sec:F2} с";
-
-            if (sec < 3600.0)
-            {
-                double min = Math.Floor(sec / 60.0);
-                double remSec = sec - min * 60.0;
-                return $"{min:F0}м {remSec:F0}с";
-            }
-
-            double totalMin = Math.Floor(sec / 60.0);
-            double hours = Math.Floor(totalMin / 60.0);
-            double remMin = totalMin - hours * 60.0;
-            return $"{hours:F0}ч {remMin:F0}м";
-        }
-
-        // ============================================================
         //  РАСКЛАДКА
-        // ============================================================
         private void LayoutControls()
         {
-            int headerH = headerPanel.Height;
+            // Защита от вызова при свёрнутом окне
+            if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
+
+            int sideW = 260;
+            int headerH = 60;
             int margin = 20;
-            int gap = 20;
-            int buttonH = btnCalculate.Height;
-            int buttonW = btnCalculate.Width;
+            int gap = 15;
 
-            int leftW = 340;
-            int leftTop = headerH + margin;
-            int leftH = ClientSize.Height - headerH - margin * 2;
-            leftPanel.Bounds = new Rectangle(margin, leftTop, leftW, leftH);
+            leftPanel.SuspendLayout();
+            leftPanel.AutoScrollPosition = Point.Empty;
+            leftPanel.Bounds = new Rectangle(0, 0, sideW, ClientSize.Height);
+            // Все основные элементы центрируем относительно ширины сайдбара.
+            int controlW = 200;
+            int controlX = (sideW - controlW) / 2;
+            int settingsW = 228;
+            int settingsX = (sideW - settingsW) / 2;
 
-            toolbarPanel.Bounds = new Rectangle(10, 10, leftPanel.Width - 20, 44);
-            int tbW = (toolbarPanel.Width - 16) / 3;
-            btnGenerate.Bounds = new Rectangle(0, 6, tbW, 32);
-            btnExcel.Bounds    = new Rectangle(tbW + 8, 6, tbW, 32);
-            btnGoogle.Bounds   = new Rectangle((tbW + 8) * 2, 6, tbW, 32);
+            titleLabel.Bounds = new Rectangle(0, 20, sideW, 40);
 
-            lblCount.Bounds = new Rectangle(10, leftPanel.Height - 30, leftPanel.Width - 20, 22);
-            dataGrid.Bounds = new Rectangle(10, 62, leftPanel.Width - 20, leftPanel.Height - 62 - 36);
+            // Сначала действия с данными, затем выбор алгоритмов.
+            btnGenerate.Bounds = new Rectangle(controlX, 92, controlW, 36);
+            btnExcel.Bounds = new Rectangle(controlX, 138, controlW, 36);
+            btnGoogle.Bounds = new Rectangle(controlX, 184, controlW, 36);
+            btnClear.Bounds = new Rectangle(controlX, 230, controlW, 36);
 
-            int optLeft = leftPanel.Right + gap;
-            int optTop = headerH + margin;
-            int optH = 150;
-            int optW = ClientSize.Width - optLeft - margin;
-            optionsPanel.Bounds = new Rectangle(optLeft, optTop, optW, optH);
+            int cbTop = 316;
+            int cbStep = 28;
+            cbBubble.Bounds    = new Rectangle(controlX, cbTop, controlW, 26);
+            cbInsertion.Bounds = new Rectangle(controlX, cbTop + cbStep, controlW, 26);
+            cbShaker.Bounds    = new Rectangle(controlX, cbTop + cbStep * 2, controlW, 26);
+            cbQuick.Bounds     = new Rectangle(controlX, cbTop + cbStep * 3, controlW, 26);
+            cbBogo.Bounds      = new Rectangle(controlX, cbTop + cbStep * 4, controlW, 26);
 
-            int wsTop = optionsPanel.Bottom + gap;
-            int wsLeft = optLeft;
-            int wsRight = ClientSize.Width - margin;
-            int wsBottom = ClientSize.Height - margin - buttonH - 10;
-            workspacePanel.Bounds = new Rectangle(wsLeft, wsTop, wsRight - wsLeft, wsBottom - wsTop);
+            // Панель настроек шире остальных элементов, но тоже строго по центру.
+            optionsPanel.Bounds = new Rectangle(settingsX, 484, settingsW, 242);
+            int settingsPad = 12;
+            int settingsInnerW = settingsW - settingsPad * 2;
+            lblDirection.Location = new Point(settingsPad, 10);
+            cmbDirection.SetBounds(settingsPad, 32, settingsInnerW, 26);
+            lblDecimalPlaces.Location = new Point(settingsPad, 76);
+            cmbDecimalPlaces.SetBounds(settingsPad, 98, settingsInnerW, 26);
+            lblDelay.Location = new Point(settingsPad, 142);
+            // Размер и положение оставлены такими же, как в 111.
+            int delayValueW = 44;
+            int delayGap = 2;
+            int sliderW = Math.Max(80, settingsInnerW - delayValueW - delayGap);
+            tbDelay.SetBounds(settingsPad, 162, sliderW, 46);
+            lblDelayValue.SetBounds(settingsPad + sliderW + delayGap, 168, delayValueW, 22);
+            lblDelayValue.TextAlign = ContentAlignment.MiddleLeft;
 
-            lblStatus.Bounds = new Rectangle(wsLeft, wsBottom + 5, wsRight - wsLeft, 22);
+            int countY = Math.Max(744, leftPanel.ClientSize.Height - 34);
+            lblCount.Bounds = new Rectangle(controlX, countY, controlW, 24);
+            leftPanel.AutoScrollMinSize = new Size(0, Math.Max(780, countY + 34));
+            leftPanel.ResumeLayout();
 
-            btnCalculate.Location = new Point(
-                ClientSize.Width - buttonW - margin,
-                ClientSize.Height - buttonH - margin);
+            headerPanel.Bounds = new Rectangle(sideW, 0,
+                Math.Max(1, ClientSize.Width - sideW), headerH);
+            var pageTitle = headerPanel.Controls["pageTitle"];
+            if (pageTitle != null) pageTitle.Location = new Point(margin, 12);
 
-            btnStop.Location = new Point(
-                btnCalculate.Left - btnStop.Width - 10,
-                ClientSize.Height - buttonH - margin);
+            // Таблица и визуализация начинаются сразу под заголовком.
+            int mainLeft = sideW + margin;
+            int contentTop = headerH + margin;
+            int mainWidth = Math.Max(1, ClientSize.Width - mainLeft - margin);
+            int contentHeight = Math.Max(1, ClientSize.Height - contentTop - 90);
+            int gridW = Math.Min(260, Math.Max(120, mainWidth / 4));
+            dataGrid.Bounds = new Rectangle(mainLeft, contentTop, gridW, contentHeight);
+            int wsLeft = mainLeft + gridW + gap;
+            workspacePanel.Bounds = new Rectangle(wsLeft, contentTop,
+                Math.Max(1, mainWidth - gridW - gap), contentHeight);
+            int buttonTop = contentTop + contentHeight + 12;
+            btnCalculate.Bounds = new Rectangle(mainLeft + mainWidth - 200, buttonTop, 200, 48);
+            btnStop.Bounds = new Rectangle(btnCalculate.Left - 130, buttonTop, 120, 48);
+            lblStatus.Bounds = new Rectangle(mainLeft, contentTop + contentHeight + 22,
+                Math.Max(1, btnStop.Left - mainLeft - 10), 24);
 
-            workspacePanel.Invalidate();
+
+            if (workspacePanel.Width > 0 && workspacePanel.Height > 0)
+                workspacePanel.Invalidate();
+            if (leftPanel.Width > 0 && leftPanel.Height > 0)
+                leftPanel.Invalidate();
+            if (headerPanel.Width > 0 && headerPanel.Height > 0)
+                headerPanel.Invalidate();
         }
 
-        // ============================================================
-        //  РИСОВАНИЕ ПАНЕЛЕЙ
-        // ============================================================
+        //  РИСОВАНИЕ
+        private void SidebarPanel_Paint(object sender, PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            var rect = leftPanel.ClientRectangle;
+
+            if (rect.Width <= 0 || rect.Height <= 0) return;
+
+            using (var brush = new SolidBrush(Color.FromArgb(18, 18, 18)))
+            {
+                g.FillRectangle(brush, rect);
+            }
+
+            var saved = g.Save();
+            g.TranslateTransform(leftPanel.AutoScrollPosition.X, leftPanel.AutoScrollPosition.Y);
+            using (var sepPen = new Pen(Color.FromArgb(100, 255, 255, 255), 1))
+                g.DrawLine(sepPen, 30, 78, rect.Width - 30, 78);
+            using (var font = new Font("Segoe UI", 9F, FontStyle.Bold))
+            using (var textBrush = new SolidBrush(Color.FromArgb(205, 205, 205)))
+                g.DrawString("АЛГОРИТМЫ СОРТИРОВКИ", font, textBrush, 30, 294);
+            g.Restore(saved);
+        }
+
         private void HeaderPanel_Paint(object sender, PaintEventArgs e)
         {
             var g = e.Graphics;
             var rect = headerPanel.ClientRectangle;
 
-            // Лазурный градиент
-            using (var brush = new LinearGradientBrush(
-                rect,
-                Color.FromArgb(10, 42, 66),
-                Color.FromArgb(20, 74, 108),
-                LinearGradientMode.Horizontal))
-            {
+            if (rect.Width <= 0 || rect.Height <= 0) return;
+
+            using (var brush = new SolidBrush(BgPanel))
                 g.FillRectangle(brush, rect);
-            }
 
-            using var pen = new Pen(AccentRed, 3);
-            g.DrawLine(pen, 0, rect.Bottom - 2, rect.Width, rect.Bottom - 2);
-
-            using var glow = new Pen(Color.FromArgb(150, AccentLight), 1);
-            g.DrawLine(glow, 0, rect.Bottom - 4, rect.Width, rect.Bottom - 4);
+            using (var pen = new Pen(Color.FromArgb(65, 65, 65), 1))
+                g.DrawLine(pen, 0, rect.Bottom - 1, rect.Width, rect.Bottom - 1);
         }
 
         private void CardPanel_Paint(object sender, PaintEventArgs e)
         {
             var p = (Panel)sender;
+            if (p.Width <= 0 || p.Height <= 0) return;
+
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            var rect = new Rectangle(0, 0, p.Width - 1, p.Height - 1);
-            using var pen = new Pen(Color.FromArgb(160, AccentRed), 1);
-            g.DrawRectangle(pen, rect);
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            var rect = new Rectangle(1, 1, Math.Max(1, p.Width - 3), Math.Max(1, p.Height - 3));
+            using var path = UiRound.Path(rect, 14);
+            using var fill = new SolidBrush(BgCard);
+            using var pen = new Pen(Color.FromArgb(68, 68, 68), 1);
+            g.FillPath(fill, path);
+            g.DrawPath(pen, path);
         }
 
-        // ============================================================
         //  ВИЗУАЛИЗАЦИЯ
-        // ============================================================
         private void WorkspacePanel_Paint(object sender, PaintEventArgs e)
         {
+            if (workspacePanel.Width <= 0 || workspacePanel.Height <= 0) return;
+
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(BgCard);
-
-            using (var borderPen = new Pen(Color.FromArgb(160, AccentRed), 1))
-                g.DrawRectangle(borderPen, 0, 0, workspacePanel.Width - 1, workspacePanel.Height - 1);
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            g.Clear(BgDark);
+            using (var outerPath = UiRound.Path(new Rectangle(1, 1, Math.Max(1, workspacePanel.Width - 3), Math.Max(1, workspacePanel.Height - 3)), 16))
+            using (var fill = new SolidBrush(BgCard))
+            using (var borderPen = new Pen(Color.FromArgb(68, 68, 68), 1))
+            {
+                g.FillPath(fill, outerPath);
+                g.DrawPath(borderPen, outerPath);
+            }
 
             if (_states.Count == 0) return;
 
@@ -835,6 +1206,8 @@ namespace fl4k
             int cellW = (workspacePanel.Width - pad * (cols + 1)) / cols;
             int cellH = (workspacePanel.Height - pad * (rows + 1)) / rows;
 
+            if (cellW <= 0 || cellH <= 0) return;
+
             for (int idx = 0; idx < n; idx++)
             {
                 int r = idx / cols;
@@ -851,6 +1224,8 @@ namespace fl4k
 
         private void DrawAlgorithm(Graphics g, AlgorithmState st, Rectangle area)
         {
+            if (area.Width <= 0 || area.Height <= 0) return;
+
             var snap = st.Snapshot();
             var data = snap.data;
 
@@ -862,8 +1237,18 @@ namespace fl4k
             if (snap.finished)
                 title += snap.err != null ? "  ✗" : "  ✓";
 
-            using var bgHeader = new SolidBrush(BgPanel);
-            g.FillRectangle(bgHeader, area.Left, area.Top, area.Width, 22);
+            using (var cardPath = UiRound.Path(new Rectangle(area.Left + 1, area.Top + 1, Math.Max(1, area.Width - 2), Math.Max(1, area.Height - 2)), 10))
+            using (var cardFill = new SolidBrush(Color.FromArgb(24, 24, 24)))
+            using (var cardBorder = new Pen(Color.FromArgb(62, 62, 62), 1))
+            {
+                g.FillPath(cardFill, cardPath);
+                g.DrawPath(cardBorder, cardPath);
+            }
+
+            using var bgHeader = new SolidBrush(Color.FromArgb(34, 34, 34));
+            var headerRect = new Rectangle(area.Left + 1, area.Top + 1, Math.Max(1, area.Width - 2), 24);
+            using (var headerPath = UiRound.Path(headerRect, 10))
+                g.FillPath(bgHeader, headerPath);
 
             using var titleBrush = new SolidBrush(st.BarColor);
             g.DrawString(title, titleFont, titleBrush, area.Left + 6, area.Top + 2);
@@ -872,9 +1257,9 @@ namespace fl4k
             {
                 string ms = snap.err != null
                     ? "ошибка"
-                    : $"≈ {FormatTimeShort(snap.avg)}  (×{snap.runs})";
+                    : $"≈ {FormatTimeTicks(snap.avgTicks)}  (×{snap.runs})";
                 var msSize = g.MeasureString(ms, infoFont);
-                using var msBrush = new SolidBrush(snap.err != null ? Color.FromArgb(244, 63, 94) : OkClr);
+                using var msBrush = new SolidBrush(snap.err != null ? Color.FromArgb(175, 175, 175) : OkClr);
                 g.DrawString(ms, infoFont, msBrush,
                     area.Right - msSize.Width - 6, area.Top + 5);
             }
@@ -885,18 +1270,19 @@ namespace fl4k
                 Math.Max(1, area.Width - 8),
                 Math.Max(1, area.Height - 24 - 22));
 
-            using (var borderPen = new Pen(Color.FromArgb(38, 88, 122), 1))
+            using (var borderPen = new Pen(Color.FromArgb(70, 70, 70), 1))
                 g.DrawRectangle(borderPen, plot);
 
             if (data.Length == 0) return;
 
-            int maxVal = data.Max();
-            int minVal = data.Min();
-            if (maxVal == minVal) maxVal = minVal + 1;
+            double maxVal = data.Max();
+            double minVal = data.Min();
+            if (Math.Abs(maxVal - minVal) < 1e-12) maxVal = minVal + 1;
 
             float barW = plot.Width / (float)data.Length;
 
-            var maxAbsStr = Math.Max(Math.Abs(maxVal), Math.Abs(minVal)).ToString();
+            double maxAbsVal = Math.Max(Math.Abs(maxVal), Math.Abs(minVal));
+            var maxAbsStr = FormatValue(maxAbsVal);
             var maxStrSize = g.MeasureString(maxAbsStr, valueFont);
             bool showAllValues = barW >= maxStrSize.Width + 2;
             bool showHighlightedValues = barW >= 10;
@@ -905,11 +1291,11 @@ namespace fl4k
             using var cmpBrush = new SolidBrush(CompareClr);
             using var swpBrush = new SolidBrush(SwapClr);
             using var valueBrush = new SolidBrush(TextSoft);
-            using var valueBrushHi = new SolidBrush(Color.FromArgb(6, 24, 38));
+            using var valueBrushHi = new SolidBrush(Color.FromArgb(18, 18, 18));
 
             for (int i = 0; i < data.Length; i++)
             {
-                float norm = (data[i] - minVal + 0.5f) / (maxVal - minVal + 1f);
+                float norm = (float)((data[i] - minVal + 0.5) / (maxVal - minVal + 1.0));
                 float h = Math.Max(2f, norm * (plot.Height - 4 - 14));
                 float x = plot.Left + i * barW;
                 float y = plot.Bottom - h;
@@ -924,7 +1310,7 @@ namespace fl4k
 
                 g.FillRectangle(brush, rect);
 
-                string valueText = data[i].ToString();
+                string valueText = FormatValue(data[i]);
                 var textSize = g.MeasureString(valueText, valueFont);
 
                 bool drawThis = showAllValues || (showHighlightedValues && (isSwap || isCmp));
@@ -934,7 +1320,6 @@ namespace fl4k
                     float ty = y - textSize.Height - 1f;
                     if (ty < plot.Top) ty = y + 1f;
 
-                    // на светлых столбиках (обмен — белый, сравнение — янтарный) — тёмный текст
                     var brushText = (isSwap || isCmp) ? valueBrushHi : valueBrush;
                     g.DrawString(valueText, valueFont, brushText, tx, ty);
                 }
@@ -945,20 +1330,106 @@ namespace fl4k
             g.DrawString(info, infoFont, infoBrush, plot.Left + 2, plot.Bottom + 2);
         }
 
-        // ============================================================
         //  ДАННЫЕ
-        // ============================================================
         private void SetupGrid()
         {
             dataGrid.Columns.Clear();
-            dataGrid.Columns.Add(new DataGridViewTextBoxColumn
+            var col = new DataGridViewTextBoxColumn
             {
                 Name = "Value",
                 HeaderText = "Значение",
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 ReadOnly = false,
                 Visible = true
-            });
+            };
+            col.DefaultCellStyle.Format = GetGridFormat();
+            dataGrid.Columns.Add(col);
+        }
+
+        private void DataGrid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.ColumnIndex != -1 || e.RowIndex < 0 || e.RowIndex >= dataGrid.Rows.Count)
+                return;
+
+            if (dataGrid.Rows[e.RowIndex].IsNewRow)
+                return;
+
+            if (_hoveredRowHeaderIndex != e.RowIndex)
+            {
+                int oldIndex = _hoveredRowHeaderIndex;
+                _hoveredRowHeaderIndex = e.RowIndex;
+                dataGrid.Cursor = Cursors.Hand;
+
+                if (oldIndex >= 0 && oldIndex < dataGrid.Rows.Count)
+                    dataGrid.InvalidateCell(-1, oldIndex);
+
+                dataGrid.InvalidateCell(-1, e.RowIndex);
+            }
+        }
+
+        private void DataGrid_CellMouseLeave(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.ColumnIndex != -1 || e.RowIndex != _hoveredRowHeaderIndex)
+                return;
+
+            int oldIndex = _hoveredRowHeaderIndex;
+            _hoveredRowHeaderIndex = -1;
+            dataGrid.Cursor = Cursors.Default;
+
+            if (oldIndex >= 0 && oldIndex < dataGrid.Rows.Count)
+                dataGrid.InvalidateCell(-1, oldIndex);
+        }
+
+        private void DataGrid_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left ||
+                e.ColumnIndex != -1 ||
+                e.RowIndex < 0 ||
+                e.RowIndex >= dataGrid.Rows.Count ||
+                dataGrid.Rows[e.RowIndex].IsNewRow)
+                return;
+
+            // Завершаем редактирование, если оно было активно.
+            if (dataGrid.IsCurrentCellInEditMode)
+                dataGrid.EndEdit();
+
+            _hoveredRowHeaderIndex = -1;
+            dataGrid.Cursor = Cursors.Default;
+            dataGrid.Rows.RemoveAt(e.RowIndex);
+            SyncDataFromGrid();
+        }
+
+        private void DataGrid_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.ColumnIndex != -1 ||
+                e.RowIndex < 0 ||
+                e.RowIndex >= dataGrid.Rows.Count ||
+                dataGrid.Rows[e.RowIndex].IsNewRow ||
+                e.RowIndex != _hoveredRowHeaderIndex)
+                return;
+
+            // На наведённом заголовке строки вместо стандартной стрелки рисуем кнопку удаления.
+            e.PaintBackground(e.ClipBounds, true);
+
+            var rect = e.CellBounds;
+            using (var hoverBrush = new SolidBrush(Color.FromArgb(46, 46, 46)))
+                e.Graphics.FillRectangle(hoverBrush, rect);
+
+            using (var pen = new Pen(Color.FromArgb(235, 235, 235), 2f))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+
+                int cx = rect.Left + rect.Width / 2;
+                int cy = rect.Top + rect.Height / 2;
+                int r = 5;
+
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.DrawLine(pen, cx - r, cy - r, cx + r, cy + r);
+                e.Graphics.DrawLine(pen, cx + r, cy - r, cx - r, cy + r);
+            }
+
+            e.Handled = true;
         }
 
         private void DataGrid_CellValidating(object sender, DataGridViewCellValidatingEventArgs e)
@@ -969,12 +1440,27 @@ namespace fl4k
             var text = e.FormattedValue?.ToString();
             if (string.IsNullOrWhiteSpace(text)) return;
 
-            if (!int.TryParse(text, out _))
+            if (!TryParseDouble(text, out _))
             {
                 MessageBox.Show(
-                    $"Некорректное значение \"{text}\" в строке {e.RowIndex + 1}. Ожидается целое число.",
+                    $"Некорректное значение \"{text}\" в строке {e.RowIndex + 1}. Ожидается число.",
                     "Ошибка ввода", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 e.Cancel = true;
+            }
+        }
+
+        private void RemoveEmptyDataRows()
+        {
+            // Удаляем только обычные пустые строки.
+            // Нижнюю служебную строку DataGridView для добавления нового значения не трогаем.
+            for (int i = dataGrid.Rows.Count - 1; i >= 0; i--)
+            {
+                var row = dataGrid.Rows[i];
+                if (row.IsNewRow) continue;
+
+                object value = row.Cells[0].Value;
+                if (value == null || string.IsNullOrWhiteSpace(value.ToString()))
+                    dataGrid.Rows.RemoveAt(i);
             }
         }
 
@@ -982,15 +1468,19 @@ namespace fl4k
         {
             try
             {
-                var list = new List<int>();
+                var list = new List<double>();
                 foreach (DataGridViewRow row in dataGrid.Rows)
                 {
                     if (row.IsNewRow) continue;
                     var cell = row.Cells[0];
                     var val = cell.Value;
-                    if (val == null || string.IsNullOrWhiteSpace(val.ToString())) continue;
-                    if (!int.TryParse(val.ToString(), out int num)) continue;
-                    list.Add(num);
+                    if (val == null) continue;
+
+                    double d;
+                    if (val is double dv) d = dv;
+                    else if (!TryParseDouble(val.ToString(), out d)) continue;
+
+                    list.Add(d);
                 }
                 _currentData = list.ToArray();
                 lblCount.Text = $"Элементов: {_currentData.Length}";
@@ -998,7 +1488,7 @@ namespace fl4k
             catch { }
         }
 
-        private void LoadDataToGrid(IEnumerable<int> data)
+        private void LoadDataToGrid(IEnumerable<double> data)
         {
             dataGrid.SuspendLayout();
             bool prevAllow = dataGrid.AllowUserToAddRows;
@@ -1019,9 +1509,7 @@ namespace fl4k
             SyncDataFromGrid();
         }
 
-        // ============================================================
         //  ФАБРИКА
-        // ============================================================
         private static SortingAlgorithm CreateAlgoByName(string name)
         {
             switch (name)
@@ -1035,24 +1523,50 @@ namespace fl4k
             }
         }
 
-        // ============================================================
         //  ГЕНЕРАЦИЯ
-        // ============================================================
         private void BtnGenerate_Click(object sender, EventArgs e)
         {
             using var dlg = new GenerateForm();
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
 
             var rnd = new Random();
-            var data = new int[dlg.Count];
+            var data = new double[dlg.Count];
+            double min = (double)dlg.Min;
+            double max = (double)dlg.Max;
+
             for (int i = 0; i < dlg.Count; i++)
-                data[i] = rnd.Next(dlg.Min, dlg.Max + 1);
+            {
+                double v = min + rnd.NextDouble() * (max - min);
+                data[i] = Math.Round(v, _decimalPlaces);
+            }
             LoadDataToGrid(data);
         }
 
-        // ============================================================
+        private void BtnClear_Click(object sender, EventArgs e)
+        {
+            if (_isRunning) return;
+
+            dataGrid.CancelEdit();
+            dataGrid.Rows.Clear();
+            _currentData = Array.Empty<double>();
+            _states.Clear();
+
+            lblCount.Text = "Элементов: 0";
+            lblStatus.Text = "Данные очищены.";
+
+            workspaceHint.Text = "Здесь будет визуализация сортировок.\n\n" +
+                                 "1. Введите/сгенерируйте/импортируйте данные.\n" +
+                                 "2. Отметьте алгоритмы слева.\n" +
+                                 "3. Нажмите «РАССЧИТАТЬ».";
+            workspaceHint.Font = new Font("Segoe UI", 11F);
+            workspaceHint.ForeColor = TextDim;
+            workspaceHint.Visible = true;
+
+            dataGrid.Refresh();
+            workspacePanel.Invalidate();
+        }
+
         //  EXCEL
-        // ============================================================
         private void BtnExcel_Click(object sender, EventArgs e)
         {
             using var dlg = new OpenFileDialog
@@ -1080,10 +1594,10 @@ namespace fl4k
             }
         }
 
-        private List<int> LoadFromExcel(string path)
+        private List<double> LoadFromExcel(string path)
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            var result = new List<int>();
+            var result = new List<double>();
 
             using var stream = File.Open(path, FileMode.Open, FileAccess.Read);
             using var reader = ExcelReaderFactory.CreateReader(stream);
@@ -1094,19 +1608,23 @@ namespace fl4k
                     if (reader.FieldCount == 0) continue;
                     var val = reader.GetValue(0);
                     if (val == null) continue;
-                    if (int.TryParse(val.ToString(), out int num))
+
+                    if (val is double d) { result.Add(d); continue; }
+                    if (val is int i2) { result.Add(i2); continue; }
+                    if (val is decimal m) { result.Add((double)m); continue; }
+                    if (val is long l) { result.Add(l); continue; }
+
+                    if (TryParseDouble(val.ToString(), out double num))
                         result.Add(num);
                     else
-                        throw new FormatException($"Значение \"{val}\" не является целым числом.");
+                        throw new FormatException($"Значение \"{val}\" не является числом.");
                 }
             } while (reader.NextResult());
 
             return result;
         }
 
-        // ============================================================
         //  GOOGLE SHEETS
-        // ============================================================
         private async void BtnGoogle_Click(object sender, EventArgs e)
         {
             using var dlg = new GoogleLinkForm();
@@ -1130,7 +1648,7 @@ namespace fl4k
             }
         }
 
-        private async Task<List<int>> LoadFromGoogleSheetsByLink(string url, bool useHtml)
+        private async Task<List<double>> LoadFromGoogleSheetsByLink(string url, bool useHtml)
         {
             if (string.IsNullOrWhiteSpace(url))
                 throw new ArgumentException("Пустая ссылка.");
@@ -1149,7 +1667,7 @@ namespace fl4k
                 content = await client.GetStringAsync(csvUrl);
             }
 
-            var result = new List<int>();
+            var result = new List<double>();
 
             if (useHtml)
             {
@@ -1158,7 +1676,7 @@ namespace fl4k
                 foreach (Match m in matches)
                 {
                     var text = WebUtility.HtmlDecode(m.Groups[1].Value).Trim();
-                    if (int.TryParse(text, out int num))
+                    if (TryParseDouble(text, out double num))
                         result.Add(num);
                 }
             }
@@ -1169,7 +1687,7 @@ namespace fl4k
                 {
                     if (string.IsNullOrWhiteSpace(line)) continue;
                     var first = line.Split(',')[0].Trim().Trim('"');
-                    if (int.TryParse(first, out int num))
+                    if (TryParseDouble(first, out double num))
                         result.Add(num);
                 }
             }
@@ -1192,18 +1710,14 @@ namespace fl4k
             return m.Success ? m.Groups[1].Value : null;
         }
 
-        // ============================================================
         //  СТОП
-        // ============================================================
         private void BtnStop_Click(object sender, EventArgs e)
         {
             _cts?.Cancel();
             lblStatus.Text = "Остановка...";
         }
 
-        // ============================================================
         //  РАССЧИТАТЬ
-        // ============================================================
         private async void BtnCalculate_Click(object sender, EventArgs e)
         {
             if (_isRunning) return;
@@ -1225,6 +1739,20 @@ namespace fl4k
                 return;
             }
 
+            bool hasSlowAlgorithm = cbBubble.Checked || cbInsertion.Checked || cbShaker.Checked;
+            if (hasSlowAlgorithm && _currentData.Length > SlowAlgorithmWarnThreshold)
+            {
+                var result = MessageBox.Show(
+                    $"Выбраны медленные алгоритмы (O(n²)), а элементов — {_currentData.Length}.\n\n" +
+                    "Это может занять очень много времени (десятки секунд или минут).\n\n" +
+                    "Продолжить?",
+                    "Большой массив",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+
+                if (result != DialogResult.Yes) return;
+            }
+
             var selectedNames = new List<string>();
             if (cbBubble.Checked)    selectedNames.Add("Пузырьковая");
             if (cbInsertion.Checked) selectedNames.Add("Вставками");
@@ -1242,7 +1770,12 @@ namespace fl4k
             _isRunning = true;
             btnCalculate.Enabled = false;
             btnStop.Enabled = true;
+            btnGenerate.Enabled = false;
+            btnExcel.Enabled = false;
+            btnGoogle.Enabled = false;
+            btnClear.Enabled = false;
             tbDelay.Enabled = false;
+            cmbDecimalPlaces.Enabled = false;
 
             _cts?.Dispose();
             _cts = new CancellationTokenSource();
@@ -1263,18 +1796,17 @@ namespace fl4k
                 {
                     Name = name,
                     BarColor = _algoColors.TryGetValue(name, out var c) ? c : AccentRed,
-                    Data = (int[])_currentData.Clone(),
+                    Data = (double[])_currentData.Clone(),
                     Visualize = visualize
                 };
                 _states.Add(st);
             }
 
             workspaceHint.Visible = false;
-            workspacePanel.Invalidate();
+            if (workspacePanel.Width > 0 && workspacePanel.Height > 0)
+                workspacePanel.Invalidate();
 
-            // ============================================================
-            //  ФАЗА 1: ЧИСТЫЙ ЗАМЕР
-            // ============================================================
+            // ФАЗА 1
             var measureTasks = new List<Task>();
 
             foreach (var name in selectedNames)
@@ -1286,7 +1818,7 @@ namespace fl4k
 
                 measureTasks.Add(Task.Run(() =>
                 {
-                    var times = new List<double>(runs);
+                    var times = new List<long>(runs);
                     long firstCmp = 0, firstSwp = 0, firstIter = 0;
                     string error = null;
 
@@ -1294,7 +1826,7 @@ namespace fl4k
                     {
                         if (token.IsCancellationRequested) break;
 
-                        var source = (int[])_currentData.Clone();
+                        var source = (double[])_currentData.Clone();
                         Array.Copy(source, st.Data, source.Length);
 
                         var algo = CreateAlgoByName(algoName);
@@ -1315,6 +1847,10 @@ namespace fl4k
                                 System.Threading.Interlocked.Increment(ref localSwp);
                                 lock (st.LogSync) st.EventLog.Add((1, i, j));
                             };
+                            algo.OnIteration += () =>
+                            {
+                                lock (st.LogSync) st.EventLog.Add((2, -1, -1));
+                            };
                         }
                         else if (collectThis)
                         {
@@ -1322,23 +1858,23 @@ namespace fl4k
                             algo.OnSwap    += (i, j) => System.Threading.Interlocked.Increment(ref localSwp);
                         }
 
-                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                        long startTicks = Stopwatch.GetTimestamp();
                         try { algo.Sort(st.Data); }
                         catch (Exception ex)
                         {
                             error = ex.Message;
-                            sw.Stop();
                             break;
                         }
-                        sw.Stop();
+                        long endTicks = Stopwatch.GetTimestamp();
+                        long elapsedTicks = endTicks - startTicks;
 
-                        times.Add(sw.Elapsed.TotalMilliseconds);
+                        times.Add(elapsedTicks);
 
                         if (collectThis)
                         {
                             firstCmp = localCmp;
                             firstSwp = localSwp;
-                            firstIter = algo.Iterations;
+                            firstIter = GetDisplayedIterations(algoName, algo.Iterations);
                         }
 
                         lock (st.Sync) st.Runs = run + 1;
@@ -1348,13 +1884,27 @@ namespace fl4k
                     {
                         if (times.Count > 0)
                         {
-                            st.AvgMs = times.Average();
-                            st.MinMs = times.Min();
-                            st.MaxMs = times.Max();
+                            long sum = 0;
+                            foreach (var t in times) sum += t;
+
+                            st.AvgTicks = sum / times.Count;
+                            st.MinTicks = times.Min();
+                            st.MaxTicks = times.Max();
                         }
-                        st.Comparisons = firstCmp;
-                        st.Swaps = firstSwp;
-                        st.Iterations = firstIter;
+                        // При визуализации счётчики стартуют с нуля и растут
+                        // непосредственно во время воспроизведения событий.
+                        if (visualize)
+                        {
+                            st.Comparisons = 0;
+                            st.Swaps = 0;
+                            st.Iterations = 0;
+                        }
+                        else
+                        {
+                            st.Comparisons = firstCmp;
+                            st.Swaps = firstSwp;
+                            st.Iterations = firstIter;
+                        }
                         st.Error = error;
                     }
                 }, token));
@@ -1363,12 +1913,10 @@ namespace fl4k
             try { await Task.WhenAll(measureTasks); }
             catch (OperationCanceledException) { }
 
-            // ============================================================
-            //  ФАЗА 2: ВОСПРОИЗВЕДЕНИЕ
-            // ============================================================
+            // ФАЗА 2
             if (visualize && !token.IsCancellationRequested)
             {
-                lblStatus.Text = "Воспроизведение визуализации...";
+                lblStatus.Text = "Визуализация... счётчики обновляются в реальном времени";
 
                 var playTasks = new List<Task>();
 
@@ -1378,15 +1926,23 @@ namespace fl4k
 
                     playTasks.Add(Task.Run(() =>
                     {
-                        var working = (int[])_currentData.Clone();
+                        var working = (double[])_currentData.Clone();
                         lock (st.Sync)
                         {
                             Array.Copy(working, st.Data, working.Length);
                             st.CompareI = st.CompareJ = st.SwapI = st.SwapJ = -1;
+                            st.Comparisons = 0;
+                            st.Swaps = 0;
+                            st.Iterations = 0;
                         }
 
                         List<(int type, int i, int j)> log;
                         lock (st.LogSync) log = new List<(int, int, int)>(st.EventLog);
+
+                        // Реализацию алгоритмов не меняем: события OnIteration остаются как есть.
+                        // Для всех сортировок, кроме BOGO, первый полный проход — проверочный.
+                        // Поэтому отображаем количество ПОВТОРОВ: все проходы, кроме первого.
+                        int remainingIterationEvents = log.Count(e => e.type == 2);
 
                         foreach (var ev in log)
                         {
@@ -1398,9 +1954,10 @@ namespace fl4k
                                 {
                                     st.CompareI = ev.i;
                                     st.CompareJ = ev.j;
+                                    st.Comparisons++;
                                 }
                             }
-                            else
+                            else if (ev.type == 1)
                             {
                                 lock (st.Sync)
                                 {
@@ -1411,6 +1968,29 @@ namespace fl4k
                                     }
                                     st.SwapI = ev.i;
                                     st.SwapJ = ev.j;
+                                    st.Swaps++;
+                                }
+                            }
+                            else if (ev.type == 2)
+                            {
+                                if (st.Name == "BOGO" || st.Name == "Быстрая")
+                                {
+                                    lock (st.Sync)
+                                    {
+                                        st.Iterations++;
+                                    }
+                                }
+                                else
+                                {
+                                    remainingIterationEvents--;
+
+                                    if (remainingIterationEvents > 0)
+                                    {
+                                        lock (st.Sync)
+                                        {
+                                            st.Iterations++;
+                                        }
+                                    }
                                 }
                             }
 
@@ -1445,16 +2025,23 @@ namespace fl4k
                 }
             }
 
-            // ============================================================
-            //  ОТЧЁТ
-            // ============================================================
-            var ordered = _states.OrderBy(s => s.AvgMs).ToList();
+            // ОТЧЁТ
+            var ordered = _states.OrderBy(s => s.AvgTicks).ToList();
             var sb = new StringBuilder();
+
+            double freq = Stopwatch.Frequency;
+            string resolution = freq >= 1_000_000_000
+                ? $"{1e12 / freq:F0} пс"
+                : freq >= 1_000_000
+                    ? $"{1e9 / freq:F1} нс"
+                    : freq >= 1_000
+                        ? $"{1e6 / freq:F2} мкс"
+                        : $"{1e3 / freq:F4} мс";
 
             if (token.IsCancellationRequested)
                 sb.AppendLine("=== Результаты (остановлено пользователем) ===");
             else
-                sb.AppendLine("=== Результаты ===");
+                sb.AppendLine($"=== Результаты (разрешение таймера: {resolution}, {freq:F0} Гц) ===");
 
             sb.AppendLine(
                 $"{"Алгоритм",-16}{"Среднее",-20}{"Мин.",-20}{"Макс.",-20}" +
@@ -1473,14 +2060,14 @@ namespace fl4k
                 else
                 {
                     sb.AppendLine(
-                        $"{s.Name,-16}{FormatTime(snap.avg),-20}{FormatTime(snap.min),-20}{FormatTime(snap.max),-20}" +
+                        $"{s.Name,-16}{FormatTimeTicks(snap.avgTicks),-20}{FormatTimeTicks(snap.minTicks),-20}{FormatTimeTicks(snap.maxTicks),-20}" +
                         $"{snap.runs,10}{snap.iter,12}{snap.cmp,14}{snap.swp,12}");
                 }
             }
 
             var fastest = ordered.FirstOrDefault(s => s.Error == null && s.Runs > 0);
             if (fastest != null)
-                sb.AppendLine($"\nСамый быстрый (по среднему): {fastest.Name} ({FormatTime(fastest.AvgMs)})");
+                sb.AppendLine($"\nСамый быстрый (по среднему): {fastest.Name} ({FormatTimeTicks(fastest.AvgTicks)})");
 
             if (!visualize)
                 sb.AppendLine($"\nВизуализация отключена: элементов больше {MaxVisualizeElements}.");
@@ -1500,13 +2087,17 @@ namespace fl4k
             _isRunning = false;
             btnCalculate.Enabled = true;
             btnStop.Enabled = false;
+            btnGenerate.Enabled = true;
+            btnExcel.Enabled = true;
+            btnGoogle.Enabled = true;
+            btnClear.Enabled = true;
             tbDelay.Enabled = true;
-            workspacePanel.Invalidate();
+            cmbDecimalPlaces.Enabled = true;
+            if (workspacePanel.Width > 0 && workspacePanel.Height > 0)
+                workspacePanel.Invalidate();
         }
 
-        // ============================================================
         //  КЛАВИШИ
-        // ============================================================
         private void Form1_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode == Keys.Escape)
@@ -1527,57 +2118,84 @@ namespace fl4k
         }
     }
 
-    // ============================================================
-    //  ФОРМА: ГЕНЕРАЦИЯ (лазурная)
-    // ============================================================
+    //  ФОРМА: ГЕНЕРАЦИЯ
     public class GenerateForm : Form
     {
         private NumericUpDown nudCount, nudMin, nudMax;
 
         public int Count => (int)nudCount.Value;
-        public int Min => (int)nudMin.Value;
-        public int Max => (int)nudMax.Value;
+        public decimal Min => nudMin.Value;
+        public decimal Max => nudMax.Value;
 
         public GenerateForm()
         {
             Text = "Генерация данных";
-            ClientSize = new Size(320, 190);
+            ClientSize = new Size(360, 220);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false; MinimizeBox = false;
-            BackColor = Color.FromArgb(22, 63, 92);
-            ForeColor = Color.FromArgb(214, 238, 250);
+            BackColor = Color.FromArgb(28, 28, 28);
+            ForeColor = Color.FromArgb(242, 242, 242);
 
-            var lblCount = new Label { Text = "Количество:", Left = 10, Top = 15, Width = 120, ForeColor = Color.FromArgb(214, 238, 250) };
-            nudCount = new NumericUpDown { Left = 140, Top = 12, Width = 140, Minimum = 1, Maximum = 500, Value = 15, BackColor = Color.FromArgb(8, 32, 52), ForeColor = Color.FromArgb(214, 238, 250) };
-
-            var lblMin = new Label { Text = "Минимум:", Left = 10, Top = 50, Width = 120, ForeColor = Color.FromArgb(214, 238, 250) };
-            nudMin = new NumericUpDown { Left = 140, Top = 47, Width = 140, Minimum = -100000, Maximum = 100000, Value = 0, BackColor = Color.FromArgb(8, 32, 52), ForeColor = Color.FromArgb(214, 238, 250) };
-
-            var lblMax = new Label { Text = "Максимум:", Left = 10, Top = 85, Width = 120, ForeColor = Color.FromArgb(214, 238, 250) };
-            nudMax = new NumericUpDown { Left = 140, Top = 82, Width = 140, Minimum = -100000, Maximum = 100000, Value = 100, BackColor = Color.FromArgb(8, 32, 52), ForeColor = Color.FromArgb(214, 238, 250) };
-
-            var btnOk = new Button
+            var lblCount = new Label { Text = "Количество:", Left = 10, Top = 15, Width = 120, ForeColor = Color.FromArgb(242, 242, 242) };
+            nudCount = new NumericUpDown
             {
-                Text = "OK", Left = 110, Top = 130, Width = 80,
+                Left = 140, Top = 12, Width = 160,
+                Minimum = 1,
+                Maximum = 1_000_000,
+                Value = 15,
+                BackColor = Color.FromArgb(18, 18, 18),
+                ForeColor = Color.FromArgb(242, 242, 242)
+            };
+
+            var lblMin = new Label { Text = "Минимум:", Left = 10, Top = 50, Width = 120, ForeColor = Color.FromArgb(242, 242, 242) };
+            nudMin = new NumericUpDown
+            {
+                Left = 140, Top = 47, Width = 160,
+                Minimum = -1_000_000, Maximum = 1_000_000, Value = 0,
+                DecimalPlaces = 2, Increment = 0.5m,
+                BackColor = Color.FromArgb(18, 18, 18), ForeColor = Color.FromArgb(242, 242, 242)
+            };
+
+            var lblMax = new Label { Text = "Максимум:", Left = 10, Top = 85, Width = 120, ForeColor = Color.FromArgb(242, 242, 242) };
+            nudMax = new NumericUpDown
+            {
+                Left = 140, Top = 82, Width = 160,
+                Minimum = -1_000_000, Maximum = 1_000_000, Value = 100,
+                DecimalPlaces = 2, Increment = 0.5m,
+                BackColor = Color.FromArgb(18, 18, 18), ForeColor = Color.FromArgb(242, 242, 242)
+            };
+
+            var btnOk = new SmoothButton
+            {
+                Text = "Сгенерировать", Left = 120, Top = 158, Width = 120, Height = 36,
                 DialogResult = DialogResult.OK,
-                BackColor = Color.FromArgb(56, 189, 248),
-                ForeColor = Color.FromArgb(6, 24, 38),
+                BackColor = Color.FromArgb(238, 238, 238),
+                ForeColor = Color.Black,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold)
             };
             btnOk.FlatAppearance.BorderSize = 0;
+            btnOk.CornerRadius = 8;
+            btnOk.BorderColor = Color.FromArgb(238, 238, 238);
+            btnOk.BorderThickness = 1;
+            btnOk.HoverBackColor = Color.FromArgb(218, 218, 218);
+            btnOk.PressedBackColor = Color.FromArgb(185, 185, 185);
 
-            var btnCancel = new Button
+            var btnCancel = new SmoothButton
             {
-                Text = "Отмена", Left = 200, Top = 130, Width = 80,
+                Text = "Отмена", Left = 250, Top = 158, Width = 90, Height = 36,
                 DialogResult = DialogResult.Cancel,
-                BackColor = Color.FromArgb(8, 32, 52),
-                ForeColor = Color.FromArgb(214, 238, 250),
+                BackColor = Color.FromArgb(18, 18, 18),
+                ForeColor = Color.FromArgb(242, 242, 242),
                 FlatStyle = FlatStyle.Flat
             };
-            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
-            btnCancel.FlatAppearance.BorderSize = 1;
+            btnCancel.FlatAppearance.BorderSize = 0;
+            btnCancel.CornerRadius = 8;
+            btnCancel.BorderColor = Color.FromArgb(78, 78, 78);
+            btnCancel.BorderThickness = 1;
+            btnCancel.HoverBackColor = Color.FromArgb(46, 46, 46);
+            btnCancel.PressedBackColor = Color.FromArgb(24, 24, 24);
 
             btnOk.Click += (s, e) =>
             {
@@ -1595,9 +2213,7 @@ namespace fl4k
         }
     }
 
-    // ============================================================
-    //  ФОРМА: GOOGLE SHEETS (лазурная)
-    // ============================================================
+    //  ФОРМА: GOOGLE SHEETS
     public class GoogleLinkForm : Form
     {
         private TextBox txtUrl;
@@ -1609,19 +2225,19 @@ namespace fl4k
         public GoogleLinkForm()
         {
             Text = "Импорт из Google Sheets";
-            ClientSize = new Size(560, 210);
+            ClientSize = new Size(580, 250);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false; MinimizeBox = false;
-            BackColor = Color.FromArgb(22, 63, 92);
-            ForeColor = Color.FromArgb(214, 238, 250);
+            BackColor = Color.FromArgb(28, 28, 28);
+            ForeColor = Color.FromArgb(242, 242, 242);
 
             var lbl = new Label
             {
                 Text = "Вставьте ссылку на Google-таблицу:\n" +
                        "(таблица должна быть опубликована или доступна по ссылке)",
                 Left = 15, Top = 15, Width = 520, Height = 40,
-                ForeColor = Color.FromArgb(214, 238, 250),
+                ForeColor = Color.FromArgb(242, 242, 242),
                 Font = new Font("Segoe UI", 9F)
             };
 
@@ -1630,46 +2246,55 @@ namespace fl4k
                 Left = 15, Top = 60, Width = 530,
                 Text = "https://docs.google.com/spreadsheets/d/",
                 Font = new Font("Consolas", 9F),
-                BackColor = Color.FromArgb(8, 32, 52),
-                ForeColor = Color.FromArgb(214, 238, 250)
+                BackColor = Color.FromArgb(18, 18, 18),
+                ForeColor = Color.FromArgb(242, 242, 242)
             };
 
             chkHtml = new CheckBox
             {
                 Text = "Использовать HTML-формат (если CSV не работает)",
                 Left = 15, Top = 95, Width = 530, Height = 24,
-                ForeColor = Color.FromArgb(214, 238, 250)
+                ForeColor = Color.FromArgb(242, 242, 242)
             };
 
             var lblHint = new Label
             {
                 Text = "Пример: https://docs.google.com/spreadsheets/d/1AbCdEf123.../edit#gid=0",
                 Left = 15, Top = 122, Width = 530, Height = 20,
-                ForeColor = Color.FromArgb(138, 190, 216),
+                ForeColor = Color.FromArgb(150, 150, 150),
                 Font = new Font("Segoe UI", 8F, FontStyle.Italic)
             };
 
-            var btnOk = new Button
+            var btnOk = new SmoothButton
             {
-                Text = "Загрузить", Left = 350, Top = 155, Width = 100,
+                Text = "Загрузить", Left = 350, Top = 192, Width = 110, Height = 36,
                 DialogResult = DialogResult.OK,
-                BackColor = Color.FromArgb(56, 189, 248),
-                ForeColor = Color.FromArgb(6, 24, 38),
+                BackColor = Color.FromArgb(238, 238, 238),
+                ForeColor = Color.Black,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold)
             };
             btnOk.FlatAppearance.BorderSize = 0;
+            btnOk.CornerRadius = 8;
+            btnOk.BorderColor = Color.FromArgb(238, 238, 238);
+            btnOk.BorderThickness = 1;
+            btnOk.HoverBackColor = Color.FromArgb(218, 218, 218);
+            btnOk.PressedBackColor = Color.FromArgb(185, 185, 185);
 
-            var btnCancel = new Button
+            var btnCancel = new SmoothButton
             {
-                Text = "Отмена", Left = 460, Top = 155, Width = 85,
+                Text = "Отмена", Left = 470, Top = 192, Width = 95, Height = 36,
                 DialogResult = DialogResult.Cancel,
-                BackColor = Color.FromArgb(8, 32, 52),
-                ForeColor = Color.FromArgb(214, 238, 250),
+                BackColor = Color.FromArgb(18, 18, 18),
+                ForeColor = Color.FromArgb(242, 242, 242),
                 FlatStyle = FlatStyle.Flat
             };
-            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(56, 189, 248);
-            btnCancel.FlatAppearance.BorderSize = 1;
+            btnCancel.FlatAppearance.BorderSize = 0;
+            btnCancel.CornerRadius = 8;
+            btnCancel.BorderColor = Color.FromArgb(78, 78, 78);
+            btnCancel.BorderThickness = 1;
+            btnCancel.HoverBackColor = Color.FromArgb(46, 46, 46);
+            btnCancel.PressedBackColor = Color.FromArgb(24, 24, 24);
 
             btnOk.Click += (s, e) =>
             {
