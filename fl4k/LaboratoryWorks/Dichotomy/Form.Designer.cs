@@ -6,7 +6,7 @@ namespace fl4k
 {
     partial class DichotomyForm
     {
-        private IContainer? components;
+        private IContainer components;
 
         protected override void Dispose(bool disposing)
         {

@@ -6,7 +6,7 @@ namespace fl4k
 {
     partial class MainForm
     {
-        private IContainer? components;
+        private IContainer components;
         private Panel leftPanel = null!;
         private Panel headerPanel = null!;
         private Panel contentPanel = null!;
@@ -121,14 +121,14 @@ namespace fl4k
             cardSubtitle.TextAlign = ContentAlignment.MiddleCenter;
             cardSubtitle.SetBounds(30, 66, 600, 28);
 
-            btnDichotomy.Text = "ЛАБОРАТОРНАЯ №1 — ДИХОТОМИЯ";
+            btnDichotomy.Text = "ДИХОТОМИЯ";
             btnDichotomy.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             btnDichotomy.ForeColor = Color.White;
             btnDichotomy.BackColor = Color.FromArgb(38, 38, 38);
             btnDichotomy.SetBounds(80, 122, 500, 56);
             btnDichotomy.Click += btnDichotomy_Click;
 
-            btnNeonix.Text = "NEONIX — ВИЗУАЛИЗАЦИЯ СОРТИРОВОК";
+            btnNeonix.Text = "ВИЗУАЛИЗАЦИЯ СОРТИРОВКИ";
             btnNeonix.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
             btnNeonix.ForeColor = Color.White;
             btnNeonix.BackColor = Color.FromArgb(38, 38, 38);

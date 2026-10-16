@@ -58,6 +58,98 @@ namespace fl4k
             e.Graphics.DrawPath(pen, path);
         }
     }
+    internal sealed class DichotomyActionButton : Button
+    {
+        private bool hovered;
+        private bool pressed;
+
+        public DichotomyActionButton()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.UserPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw,
+                true);
+
+            FlatStyle = FlatStyle.Flat;
+            FlatAppearance.BorderSize = 0;
+            Cursor = Cursors.Hand;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            base.OnMouseEnter(e);
+            hovered = true;
+            Invalidate();
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            hovered = false;
+            pressed = false;
+            Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs mevent)
+        {
+            base.OnMouseDown(mevent);
+            pressed = true;
+            Invalidate();
+        }
+
+        protected override void OnMouseUp(MouseEventArgs mevent)
+        {
+            base.OnMouseUp(mevent);
+            pressed = false;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            Color parentColor =
+                Parent?.BackColor == Color.Transparent
+                    ? Color.FromArgb(18, 18, 18)
+                    : Parent?.BackColor ?? Color.FromArgb(18, 18, 18);
+
+            e.Graphics.Clear(parentColor);
+
+            var rect = new Rectangle(
+                1,
+                1,
+                Math.Max(1, Width - 3),
+                Math.Max(1, Height - 3));
+
+            using var path = DichotomyUiRound.Path(rect, 12);
+
+            Color fill = pressed
+                ? Color.FromArgb(28, 28, 28)
+                : hovered
+                    ? Color.FromArgb(55, 55, 55)
+                    : BackColor;
+
+            using (var brush = new SolidBrush(fill))
+                e.Graphics.FillPath(brush, path);
+
+            using (var pen = new Pen(Color.FromArgb(72, 72, 72), 1f))
+                e.Graphics.DrawPath(pen, path);
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                Text,
+                Font,
+                rect,
+                ForeColor,
+                TextFormatFlags.HorizontalCenter |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis);
+        }
+    }
+
     internal sealed class DichotomyDarkMenuColorTable : ProfessionalColorTable
     {
         private readonly Color bg = Color.FromArgb(30, 30, 30);
@@ -102,6 +194,8 @@ namespace fl4k
         private double rootY;
         private bool hasResult;
         private bool findAllRoots;
+        private double currentEps = 0.001;
+        private int displayDecimals = 3;
         private readonly List<(double x, double y)> foundRoots = new();
         public DichotomyForm()
         {
@@ -129,7 +223,8 @@ namespace fl4k
             {
                 Dock = DockStyle.Left,
                 Width = 290,
-                BackColor = Color.FromArgb(18, 18, 18)
+                BackColor = Color.FromArgb(18, 18, 18),
+                AutoScroll = true
             };
             leftPanel.Paint += (_, e) =>
             {
@@ -165,60 +260,51 @@ namespace fl4k
                 AutoSize = true
             };
             leftPanel.Controls.Add(actionsTitle);
-            var menu = new MenuStrip
+            var btnCalculate = new DichotomyActionButton
             {
-                AutoSize = false,
+                Text = "РАССЧИТАТЬ",
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(38, 38, 38),
                 Location = new Point(30, 118),
-                Size = new Size(230, 42),
-                BackColor = BgCard,
-                ForeColor = TextMain,
-                RenderMode = ToolStripRenderMode.Professional,
-                Renderer = new ToolStripProfessionalRenderer(new DichotomyDarkMenuColorTable()),
-                GripStyle = ToolStripGripStyle.Hidden,
-                Padding = new Padding(4, 4, 4, 4),
-                Dock = DockStyle.None
-            };
-            var calculateItem = new ToolStripMenuItem("РАССЧИТАТЬ")
-            {
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
-                AutoSize = false,
-                Size = new Size(100, 32),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            var clearItem = new ToolStripMenuItem("ОЧИСТИТЬ")
-            {
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
-                AutoSize = false,
-                Size = new Size(70, 32),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            var menuItem = new ToolStripMenuItem("МЕНЮ")
-            {
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 8F, FontStyle.Bold),
-                AutoSize = false,
-                Size = new Size(52, 32),
-                TextAlign = ContentAlignment.MiddleCenter
+                Size = new Size(230, 40)
             };
 
-            calculateItem.Click += (_, _) => CalculateRoot();
-            clearItem.Click += (_, _) => ClearAll();
-            menuItem.Click += (_, _) => Close();
+            var btnClear = new DichotomyActionButton
+            {
+                Text = "ОЧИСТИТЬ",
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(38, 38, 38),
+                Location = new Point(30, 168),
+                Size = new Size(230, 40)
+            };
 
-            menu.Items.Add(calculateItem);
-            menu.Items.Add(clearItem);
-            menu.Items.Add(menuItem);
-            MainMenuStrip = menu;
-            leftPanel.Controls.Add(menu);
+            var btnMenu = new DichotomyActionButton
+            {
+                Text = "МЕНЮ",
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(38, 38, 38),
+                Location = new Point(30, 218),
+                Size = new Size(230, 40)
+            };
+
+            btnCalculate.Click += (_, _) => CalculateRoot();
+            btnClear.Click += (_, _) => ClearAll();
+            btnMenu.Click += (_, _) => Close();
+
+            leftPanel.Controls.Add(btnCalculate);
+            leftPanel.Controls.Add(btnClear);
+            leftPanel.Controls.Add(btnMenu);
+
             var paramsTitle = new Label
             {
                 Text = "ПАРАМЕТРЫ",
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(205, 205, 205),
                 BackColor = Color.Transparent,
-                Location = new Point(30, 186),
+                Location = new Point(30, 290),
                 AutoSize = true
             };
             leftPanel.Controls.Add(paramsTitle);
@@ -227,8 +313,8 @@ namespace fl4k
                 Radius = 14,
                 BorderColor = Border,
                 BackColor = BgCard,
-                Location = new Point(30, 210),
-                Size = new Size(230, 356)
+                Location = new Point(30, 314),
+                Size = new Size(230, 320)
             };
             leftPanel.Controls.Add(paramsCard);
             txtA.Text = "-2";
@@ -240,21 +326,15 @@ namespace fl4k
             AddInput(paramsCard, "e", txtEps, 18, 168, 194);
             AddInput(paramsCard, "f(x)", txtFunction, 18, 242, 194);
 
-            var modeButton = new Button
+            var modeButton = new DichotomyActionButton
             {
                 Text = "1 КОРЕНЬ",
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(38, 38, 38),
-                FlatStyle = FlatStyle.Flat,
-                Location = new Point(30, 582),
-                Size = new Size(230, 38),
-                Cursor = Cursors.Hand
+                Location = new Point(30, 650),
+                Size = new Size(230, 40)
             };
-            modeButton.FlatAppearance.BorderColor = Border;
-            modeButton.FlatAppearance.BorderSize = 1;
-            modeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, 55, 55);
-            modeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(28, 28, 28);
 
             modeButton.Click += (_, _) =>
             {
@@ -279,7 +359,7 @@ namespace fl4k
                 Radius = 14,
                 BorderColor = Border,
                 BackColor = BgCard,
-                Location = new Point(30, 642),
+                Location = new Point(30, 712),
                 Size = new Size(230, 112),
                 Anchor = AnchorStyles.Left | AnchorStyles.Bottom
             };
@@ -451,6 +531,10 @@ namespace fl4k
                     throw new ArgumentException("Должно выполняться условие a < b.");
                 if (eps <= 0)
                     throw new ArgumentException("Точность e должна быть больше нуля.");
+
+                currentEps = eps;
+                displayDecimals = GetDecimalsFromEpsilon(eps);
+
                 if (string.IsNullOrWhiteSpace(txtFunction.Text))
                     throw new ArgumentException("Введите формулу f(x).");
 
@@ -772,20 +856,41 @@ namespace fl4k
             roots.Add((x, y));
         }
 
+        private static int GetDecimalsFromEpsilon(double eps)
+        {
+            if (eps >= 1.0)
+                return 0;
+
+            int decimals = (int)Math.Ceiling(-Math.Log10(eps));
+            return Math.Clamp(decimals, 0, 12);
+        }
+
+        private string FormatByEpsilon(double value)
+        {
+            double zeroThreshold = 0.5 * Math.Pow(10.0, -displayDecimals);
+
+            if (Math.Abs(value) < zeroThreshold)
+                value = 0.0;
+
+            return value.ToString(
+                "F" + displayDecimals,
+                CultureInfo.GetCultureInfo("ru-RU"));
+        }
+
         private void ShowResult()
         {
             hasResult = true;
 
             if (findAllRoots)
             {
-                lblRoot.Text = string.Join("; ", foundRoots.Select(r => r.x.ToString("G10")));
-                lblFx.Text = string.Join("; ", foundRoots.Select(r => r.y.ToString("G4")));
+                lblRoot.Text = string.Join("; ", foundRoots.Select(r => FormatByEpsilon(r.x)));
+                lblFx.Text = string.Join("; ", foundRoots.Select(r => FormatByEpsilon(r.y)));
                 lblStatus.Text = $"Найдено корней: {foundRoots.Count}.";
             }
             else
             {
-                lblRoot.Text = $"{rootX:G12}";
-                lblFx.Text = $"{rootY:G12}";
+                lblRoot.Text = FormatByEpsilon(rootX);
+                lblFx.Text = FormatByEpsilon(rootY);
                 lblStatus.Text = "Корень найден.";
             }
 
@@ -963,7 +1068,7 @@ namespace fl4k
                     g.DrawEllipse(rootOutline, rx - 5, ry - 5, 10, 10);
 
                     if (foundRoots.Count <= 12)
-                        g.DrawString($"x ≈ {root.x:G6}", smallFont, rootBrush, rx + 7, ry - 20);
+                        g.DrawString($"x ≈ {FormatByEpsilon(root.x)}", smallFont, rootBrush, rx + 7, ry - 20);
                 }
             }
             g.DrawString(graphA.ToString("G5"), smallFont, textBrush, plot.Left - 4, plot.Bottom + 8);
