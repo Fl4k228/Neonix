@@ -516,7 +516,7 @@ namespace fl4k
     // ============================================================
     //  ГЛАВНАЯ ФОРМА
     // ============================================================
-    public partial class Form1 : Form
+    public partial class NeonixForm : Form
     {
         // ---------- Палитра: графит / чёрный / белый ----------
         private static readonly Color BgDark      = Color.FromArgb(14, 14, 14);
@@ -544,7 +544,7 @@ namespace fl4k
         private Label titleLabel;
 
         private Panel leftPanel;
-        private Button btnGenerate, btnExcel, btnGoogle, btnClear;
+        private Button btnGenerate, btnExcel, btnGoogle, btnClear, btnMenu;
         private DataGridView dataGrid;
         private Label lblCount;
 
@@ -582,7 +582,7 @@ namespace fl4k
             ["BOGO"]        = Color.FromArgb(125, 125, 125)
         };
 
-        public Form1()
+        public NeonixForm()
         {
             InitializeComponent();
 
@@ -623,6 +623,13 @@ namespace fl4k
             base.OnLoad(e);
             EnterFullscreen();
             LayoutControls();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _cts?.Cancel();
+            _renderTimer?.Stop();
+            base.OnFormClosing(e);
         }
 
         // ============================================================
@@ -741,14 +748,19 @@ namespace fl4k
             btnExcel    = MakeSmallButton("Импорт Excel");
             btnGoogle   = MakeSmallButton("Google Sheets");
             btnClear    = MakeSmallButton("Очистить");
+            btnMenu     = MakeSmallButton("Меню");
+
             btnGenerate.Click += BtnGenerate_Click;
             btnExcel.Click    += BtnExcel_Click;
             btnGoogle.Click   += BtnGoogle_Click;
             btnClear.Click    += BtnClear_Click;
+            btnMenu.Click     += BtnMenu_Click;
+
             leftPanel.Controls.Add(btnGenerate);
             leftPanel.Controls.Add(btnExcel);
             leftPanel.Controls.Add(btnGoogle);
             leftPanel.Controls.Add(btnClear);
+            leftPanel.Controls.Add(btnMenu);
 
             cbBubble    = MakeAlgoCheck("Пузырьковая", new Point(0, 0), true);
             cbInsertion = MakeAlgoCheck("Вставками",   new Point(0, 0), false);
@@ -1080,8 +1092,9 @@ namespace fl4k
             btnExcel.Bounds = new Rectangle(controlX, 138, controlW, 36);
             btnGoogle.Bounds = new Rectangle(controlX, 184, controlW, 36);
             btnClear.Bounds = new Rectangle(controlX, 230, controlW, 36);
+            btnMenu.Bounds = new Rectangle(controlX, 276, controlW, 36);
 
-            int cbTop = 316;
+            int cbTop = 362;
             int cbStep = 28;
             cbBubble.Bounds    = new Rectangle(controlX, cbTop, controlW, 26);
             cbInsertion.Bounds = new Rectangle(controlX, cbTop + cbStep, controlW, 26);
@@ -1090,7 +1103,7 @@ namespace fl4k
             cbBogo.Bounds      = new Rectangle(controlX, cbTop + cbStep * 4, controlW, 26);
 
             // Панель настроек шире остальных элементов, но тоже строго по центру.
-            optionsPanel.Bounds = new Rectangle(settingsX, 484, settingsW, 242);
+            optionsPanel.Bounds = new Rectangle(settingsX, 530, settingsW, 242);
             int settingsPad = 12;
             int settingsInnerW = settingsW - settingsPad * 2;
             lblDirection.Location = new Point(settingsPad, 10);
@@ -1106,9 +1119,9 @@ namespace fl4k
             lblDelayValue.SetBounds(settingsPad + sliderW + delayGap, 168, delayValueW, 22);
             lblDelayValue.TextAlign = ContentAlignment.MiddleLeft;
 
-            int countY = Math.Max(744, leftPanel.ClientSize.Height - 34);
+            int countY = Math.Max(790, leftPanel.ClientSize.Height - 34);
             lblCount.Bounds = new Rectangle(controlX, countY, controlW, 24);
-            leftPanel.AutoScrollMinSize = new Size(0, Math.Max(780, countY + 34));
+            leftPanel.AutoScrollMinSize = new Size(0, Math.Max(830, countY + 34));
             leftPanel.ResumeLayout();
 
             headerPanel.Bounds = new Rectangle(sideW, 0,
@@ -1165,7 +1178,7 @@ namespace fl4k
                 g.DrawLine(sepPen, 30, 78, rect.Width - 30, 78);
             using (var font = new Font("Segoe UI", 9F, FontStyle.Bold))
             using (var textBrush = new SolidBrush(Color.FromArgb(205, 205, 205)))
-                g.DrawString("АЛГОРИТМЫ СОРТИРОВКИ", font, textBrush, 30, 294);
+                g.DrawString("АЛГОРИТМЫ СОРТИРОВКИ", font, textBrush, 30, 340);
             g.Restore(saved);
         }
 
@@ -1580,6 +1593,14 @@ namespace fl4k
                 data[i] = Math.Round(v, _decimalPlaces);
             }
             LoadDataToGrid(data);
+        }
+
+        private void BtnMenu_Click(object sender, EventArgs e)
+        {
+            if (_isRunning)
+                _cts?.Cancel();
+
+            Close();
         }
 
         private void BtnClear_Click(object sender, EventArgs e)
