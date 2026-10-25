@@ -262,7 +262,7 @@ namespace fl4k
             leftPanel.Controls.Add(actionsTitle);
             var btnCalculate = new DichotomyActionButton
             {
-                Text = "РАССЧИТАТЬ",
+                Text = "Рассчитать",
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(38, 38, 38),
@@ -272,7 +272,7 @@ namespace fl4k
 
             var btnClear = new DichotomyActionButton
             {
-                Text = "ОЧИСТИТЬ",
+                Text = "Очистить",
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(38, 38, 38),
@@ -282,7 +282,7 @@ namespace fl4k
 
             var btnMenu = new DichotomyActionButton
             {
-                Text = "МЕНЮ",
+                Text = "Назад",
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(38, 38, 38),
@@ -328,7 +328,7 @@ namespace fl4k
 
             var modeButton = new DichotomyActionButton
             {
-                Text = "1 КОРЕНЬ",
+                Text = "1 корень",
                 Font = new Font("Segoe UI", 9F, FontStyle.Bold),
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(38, 38, 38),
@@ -339,14 +339,14 @@ namespace fl4k
             modeButton.Click += (_, _) =>
             {
                 findAllRoots = !findAllRoots;
-                modeButton.Text = findAllRoots ? "ВСЕ КОРНИ" : "1 КОРЕНЬ";
+                modeButton.Text = findAllRoots ? "Множество корней" : "1 корень";
 
                 foundRoots.Clear();
                 hasResult = false;
                 lblRoot.Text = "—";
                 lblFx.Text = "—";
                 lblStatus.Text = findAllRoots
-                    ? "Режим: поиск всех корней на [a, b]."
+                    ? "Режим: поиск множества корней на [a, b]."
                     : "Режим: поиск одного корня.";
                 lblStatus.ForeColor = TextDim;
                 graphPanel.Invalidate();
@@ -877,20 +877,61 @@ namespace fl4k
                 CultureInfo.GetCultureInfo("ru-RU"));
         }
 
+        // f(x) выводим точнее, чем x, чтобы маленькое значение
+        // не превращалось визуально в ложный ноль.
+        // Функция считается от того x, который реально показан пользователю.
+        private double GetDisplayedFunctionValue(double x)
+        {
+            if (currentFunction == null)
+                return double.NaN;
+
+            double displayedX = Math.Round(
+                x,
+                displayDecimals,
+                MidpointRounding.AwayFromZero);
+
+            return currentFunction(displayedX);
+        }
+
+        private string FormatFunctionValue(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+                return "—";
+
+            var culture = CultureInfo.GetCultureInfo("ru-RU");
+            int decimals = Math.Clamp(displayDecimals + 3, 6, 12);
+            double abs = Math.Abs(value);
+
+            if (abs < 1e-15)
+                return 0.0.ToString("F" + decimals, culture);
+
+            double scientificThreshold = Math.Pow(10.0, -decimals);
+            if (abs < scientificThreshold)
+                return value.ToString("0.######E+0", culture);
+
+            return value.ToString("F" + decimals, culture);
+        }
+
         private void ShowResult()
         {
             hasResult = true;
 
             if (findAllRoots)
             {
-                lblRoot.Text = string.Join("; ", foundRoots.Select(r => FormatByEpsilon(r.x)));
-                lblFx.Text = string.Join("; ", foundRoots.Select(r => FormatByEpsilon(r.y)));
+                lblRoot.Text = string.Join("; ",
+                    foundRoots.Select(r => FormatByEpsilon(r.x)));
+
+                lblFx.Text = string.Join("; ",
+                    foundRoots.Select(r =>
+                        FormatFunctionValue(GetDisplayedFunctionValue(r.x))));
+
                 lblStatus.Text = $"Найдено корней: {foundRoots.Count}.";
             }
             else
             {
                 lblRoot.Text = FormatByEpsilon(rootX);
-                lblFx.Text = FormatByEpsilon(rootY);
+                lblFx.Text = FormatFunctionValue(
+                    GetDisplayedFunctionValue(rootX));
                 lblStatus.Text = "Корень найден.";
             }
 

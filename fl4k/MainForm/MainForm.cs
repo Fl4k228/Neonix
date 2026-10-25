@@ -8,6 +8,7 @@ namespace fl4k
     public partial class MainForm : Form
     {
         public event Action? DichotomyRequested;
+        public event Action? GoldenSectionRequested;
         public event Action? NeonixRequested;
         public event Action? ExitRequested;
 
@@ -49,6 +50,9 @@ namespace fl4k
 
         private void btnDichotomy_Click(object? sender, EventArgs e)
             => DichotomyRequested?.Invoke();
+
+        private void btnGoldenSection_Click(object? sender, EventArgs e)
+            => GoldenSectionRequested?.Invoke();
 
         private void btnNeonix_Click(object? sender, EventArgs e)
             => NeonixRequested?.Invoke();

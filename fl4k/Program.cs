@@ -33,6 +33,9 @@ namespace fl4k
             form.DichotomyRequested += () =>
                 OpenLaboratory(new DichotomyForm());
 
+            form.GoldenSectionRequested += () =>
+                OpenLaboratory(new GoldenSectionForm());
+
             form.NeonixRequested += () =>
                 OpenLaboratory(new NeonixForm());
 

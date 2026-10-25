@@ -572,6 +572,7 @@ namespace fl4k
         private bool _isRunning;
         private CancellationTokenSource _cts;
         private int _hoveredRowHeaderIndex = -1;
+        private bool _bulkGridUpdate;
 
         private readonly Dictionary<string, Color> _algoColors = new()
         {
@@ -594,17 +595,32 @@ namespace fl4k
             BuildUi();
             SetupGrid();
 
-            dataGrid.CellValueChanged += (s, e) => SyncDataFromGrid();
+            dataGrid.CellValueChanged += (s, e) =>
+            {
+                if (!_bulkGridUpdate)
+                    SyncDataFromGrid();
+            };
             dataGrid.CellEndEdit += (s, e) =>
             {
+                if (_bulkGridUpdate) return;
+
                 BeginInvoke((Action)(() =>
                 {
+                    if (_bulkGridUpdate) return;
                     RemoveEmptyDataRows();
                     SyncDataFromGrid();
                 }));
             };
-            dataGrid.RowsRemoved     += (s, e) => SyncDataFromGrid();
-            dataGrid.UserDeletingRow += (s, e) => BeginInvoke((Action)SyncDataFromGrid);
+            dataGrid.RowsRemoved += (s, e) =>
+            {
+                if (!_bulkGridUpdate)
+                    SyncDataFromGrid();
+            };
+            dataGrid.UserDeletingRow += (s, e) =>
+            {
+                if (!_bulkGridUpdate)
+                    BeginInvoke((Action)SyncDataFromGrid);
+            };
 
             KeyDown += Form1_KeyDown;
             Resize += (s, e) => LayoutControls();
@@ -612,8 +628,13 @@ namespace fl4k
             _renderTimer = new System.Windows.Forms.Timer { Interval = 16 };
             _renderTimer.Tick += (s, e) =>
             {
-                if (_states.Count > 0 && workspacePanel.Width > 0 && workspacePanel.Height > 0)
+                if (_isRunning &&
+                    _states.Count > 0 &&
+                    workspacePanel.Width > 0 &&
+                    workspacePanel.Height > 0)
+                {
                     workspacePanel.Invalidate();
+                }
             };
             _renderTimer.Start();
         }
@@ -748,7 +769,7 @@ namespace fl4k
             btnExcel    = MakeSmallButton("Импорт Excel");
             btnGoogle   = MakeSmallButton("Google Sheets");
             btnClear    = MakeSmallButton("Очистить");
-            btnMenu     = MakeSmallButton("Меню");
+            btnMenu     = MakeSmallButton("Назад");
 
             btnGenerate.Click += BtnGenerate_Click;
             btnExcel.Click    += BtnExcel_Click;
@@ -1539,23 +1560,42 @@ namespace fl4k
 
         private void LoadDataToGrid(IEnumerable<double> data)
         {
-            dataGrid.SuspendLayout();
+            // Материализуем данные один раз. Раньше при заполнении каждой ячейки
+            // срабатывал CellValueChanged -> SyncDataFromGrid(), из-за чего
+            // большой массив многократно перечитывался из таблицы.
+            var list = data as IList<double> ?? data.ToList();
+
             bool prevAllow = dataGrid.AllowUserToAddRows;
-            dataGrid.AllowUserToAddRows = false;
-            dataGrid.Rows.Clear();
+            _bulkGridUpdate = true;
+            dataGrid.SuspendLayout();
 
-            var list = data.ToList();
-            for (int i = 0; i < list.Count; i++)
-                dataGrid.Rows.Add();
-            for (int i = 0; i < list.Count; i++)
-                dataGrid.Rows[i].Cells[0].Value = list[i];
+            try
+            {
+                dataGrid.AllowUserToAddRows = false;
+                dataGrid.Rows.Clear();
 
-            dataGrid.AllowUserToAddRows = prevAllow;
-            dataGrid.ResumeLayout();
-            dataGrid.Refresh();
+                // Добавляем все строки одним вызовом — заметно быстрее,
+                // чем Rows.Add() для каждой строки отдельно.
+                if (list.Count > 0)
+                    dataGrid.Rows.Add(list.Count);
+
+                for (int i = 0; i < list.Count; i++)
+                    dataGrid.Rows[i].Cells[0].Value = list[i];
+
+                // Не перечитываем таблицу после заполнения:
+                // исходные данные уже находятся у нас в памяти.
+                _currentData = list.ToArray();
+                lblCount.Text = $"Элементов: {_currentData.Length}";
+            }
+            finally
+            {
+                dataGrid.AllowUserToAddRows = prevAllow;
+                _bulkGridUpdate = false;
+                dataGrid.ResumeLayout();
+            }
+
+            // Одной перерисовки после полной загрузки достаточно.
             dataGrid.Invalidate();
-
-            SyncDataFromGrid();
         }
 
         // ============================================================
@@ -1868,6 +1908,17 @@ namespace fl4k
                     Data = (double[])_currentData.Clone(),
                     Visualize = visualize
                 };
+
+                // Для небольших визуализируемых массивов заранее резервируем
+                // место под события, чтобы List не расширялся много раз.
+                if (visualize && name != "BOGO")
+                {
+                    int estimatedEvents = Math.Min(
+                        20_000,
+                        Math.Max(256, _currentData.Length * _currentData.Length * 3));
+                    st.EventLog.Capacity = estimatedEvents;
+                }
+
                 _states.Add(st);
             }
 
@@ -1908,23 +1959,23 @@ namespace fl4k
                         {
                             algo.OnCompare += (i, j) =>
                             {
-                                System.Threading.Interlocked.Increment(ref localCmp);
-                                lock (st.LogSync) st.EventLog.Add((0, i, j));
+                                localCmp++;
+                                st.EventLog.Add((0, i, j));
                             };
                             algo.OnSwap += (i, j) =>
                             {
-                                System.Threading.Interlocked.Increment(ref localSwp);
-                                lock (st.LogSync) st.EventLog.Add((1, i, j));
+                                localSwp++;
+                                st.EventLog.Add((1, i, j));
                             };
                             algo.OnIteration += () =>
                             {
-                                lock (st.LogSync) st.EventLog.Add((2, -1, -1));
+                                st.EventLog.Add((2, -1, -1));
                             };
                         }
                         else if (collectThis)
                         {
-                            algo.OnCompare += (i, j) => System.Threading.Interlocked.Increment(ref localCmp);
-                            algo.OnSwap    += (i, j) => System.Threading.Interlocked.Increment(ref localSwp);
+                            algo.OnCompare += (i, j) => localCmp++;
+                            algo.OnSwap    += (i, j) => localSwp++;
                         }
 
                         long startTicks = Stopwatch.GetTimestamp();
@@ -2005,77 +2056,112 @@ namespace fl4k
                             st.Iterations = 0;
                         }
 
-                        List<(int type, int i, int j)> log;
-                        lock (st.LogSync) log = new List<(int, int, int)>(st.EventLog);
+                        var log = new List<(int type, int i, int j)>(st.EventLog);
 
                         // Реализацию алгоритмов не меняем: события OnIteration остаются как есть.
                         // Для всех сортировок, кроме BOGO, первый полный проход — проверочный.
                         // Поэтому отображаем количество ПОВТОРОВ: все проходы, кроме первого.
                         int remainingIterationEvents = log.Count(e => e.type == 2);
 
-                        foreach (var ev in log)
+                        if (delayMs <= 0)
                         {
-                            if (token.IsCancellationRequested) break;
+                            // Быстрый режим: при нулевой задержке нет смысла брать lock
+                            // и перерисовывать состояние для каждого отдельного события.
+                            // Итоговые значения и счётчики остаются теми же.
+                            lock (st.Sync)
+                            {
+                                foreach (var ev in log)
+                                {
+                                    if (token.IsCancellationRequested) break;
 
-                            if (ev.type == 0)
-                            {
-                                lock (st.Sync)
-                                {
-                                    st.CompareI = ev.i;
-                                    st.CompareJ = ev.j;
-                                    st.Comparisons++;
-                                }
-                            }
-                            else if (ev.type == 1)
-                            {
-                                lock (st.Sync)
-                                {
-                                    if (ev.i >= 0 && ev.j >= 0 &&
-                                        ev.i < st.Data.Length && ev.j < st.Data.Length)
+                                    if (ev.type == 0)
                                     {
-                                        (st.Data[ev.i], st.Data[ev.j]) = (st.Data[ev.j], st.Data[ev.i]);
+                                        st.CompareI = ev.i;
+                                        st.CompareJ = ev.j;
+                                        st.Comparisons++;
                                     }
-                                    st.SwapI = ev.i;
-                                    st.SwapJ = ev.j;
-                                    st.Swaps++;
-                                }
-                            }
-                            else if (ev.type == 2)
-                            {
-                                if (st.Name == "BOGO")
-                                {
-                                    // BOGO не трогаем — считаем его итерации как раньше.
-                                    lock (st.Sync)
+                                    else if (ev.type == 1)
                                     {
-                                        st.Iterations++;
-                                    }
-                                }
-                                else
-                                {
-                                    // Событие приходит в конце полного логического прохода.
-                                    // Если после него остаётся ещё один проход, значит алгоритм
-                                    // начинает повтор — именно его и считаем как +1 итерацию.
-                                    remainingIterationEvents--;
+                                        if (ev.i >= 0 && ev.j >= 0 &&
+                                            ev.i < st.Data.Length && ev.j < st.Data.Length)
+                                        {
+                                            (st.Data[ev.i], st.Data[ev.j]) =
+                                                (st.Data[ev.j], st.Data[ev.i]);
+                                        }
 
-                                    if (remainingIterationEvents > 0)
+                                        st.SwapI = ev.i;
+                                        st.SwapJ = ev.j;
+                                        st.Swaps++;
+                                    }
+                                    else if (ev.type == 2)
                                     {
-                                        lock (st.Sync)
+                                        if (st.Name == "BOGO")
                                         {
                                             st.Iterations++;
+                                        }
+                                        else
+                                        {
+                                            remainingIterationEvents--;
+                                            if (remainingIterationEvents > 0)
+                                                st.Iterations++;
                                         }
                                     }
                                 }
                             }
-
-                            if (delayMs > 0)
+                        }
+                        else
+                        {
+                            foreach (var ev in log)
                             {
-                                int slept = 0;
-                                while (slept < delayMs && !token.IsCancellationRequested)
+                                if (token.IsCancellationRequested) break;
+
+                                if (ev.type == 0)
                                 {
-                                    int chunk = Math.Min(10, delayMs - slept);
-                                    Thread.Sleep(chunk);
-                                    slept += chunk;
+                                    lock (st.Sync)
+                                    {
+                                        st.CompareI = ev.i;
+                                        st.CompareJ = ev.j;
+                                        st.Comparisons++;
+                                    }
                                 }
+                                else if (ev.type == 1)
+                                {
+                                    lock (st.Sync)
+                                    {
+                                        if (ev.i >= 0 && ev.j >= 0 &&
+                                            ev.i < st.Data.Length && ev.j < st.Data.Length)
+                                        {
+                                            (st.Data[ev.i], st.Data[ev.j]) =
+                                                (st.Data[ev.j], st.Data[ev.i]);
+                                        }
+
+                                        st.SwapI = ev.i;
+                                        st.SwapJ = ev.j;
+                                        st.Swaps++;
+                                    }
+                                }
+                                else if (ev.type == 2)
+                                {
+                                    if (st.Name == "BOGO")
+                                    {
+                                        lock (st.Sync)
+                                            st.Iterations++;
+                                    }
+                                    else
+                                    {
+                                        remainingIterationEvents--;
+                                        if (remainingIterationEvents > 0)
+                                        {
+                                            lock (st.Sync)
+                                                st.Iterations++;
+                                        }
+                                    }
+                                }
+
+                                // WaitHandle сохраняет заданную пользователем задержку,
+                                // но позволяет мгновенно прервать ожидание по кнопке СТОП/Esc.
+                                if (token.WaitHandle.WaitOne(delayMs))
+                                    break;
                             }
                         }
 
@@ -2178,12 +2264,10 @@ namespace fl4k
             if (e.KeyCode == Keys.Escape)
             {
                 if (_isRunning)
-                {
                     _cts?.Cancel();
-                    lblStatus.Text = "Остановка...";
-                }
-                else if (_isFullscreen) ExitFullscreen();
-                else Close();
+
+                Close();
+                return;
             }
             else if (e.KeyCode == Keys.F11)
             {
